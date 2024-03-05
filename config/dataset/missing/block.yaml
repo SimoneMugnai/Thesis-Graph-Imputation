@@ -1,0 +1,3 @@
+name: block
+p_fault: 0.01
+p_noise: 0.05

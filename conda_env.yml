@@ -1,0 +1,45 @@
+name: smugnai
+channels:
+  - pytorch
+  - pyg
+  - nvidia                    # remove for cpu installation
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - matplotlib
+  - pytorch>=2.0.0
+  - pytorch-cuda>=11.7         # remove for cpu installation
+  - pyg
+  - pytorch-cluster
+  - pytorch-scatter
+  - pytorch-sparse
+  - torchvision
+  - lightning
+  - neptune
+  - pip
+  - pip:
+      - hydra-core
+      - omegaconf
+      - hydra-optuna-sweeper
+      - hydra-joblib-launcher
+      # Notebooks ###########
+      - jupyterlab
+      - notebook
+      # Plotting ############
+      - mpld3
+      - plotly
+
+# To install the environment:
+# > conda env create -f conda_env.yml
+# > conda activate smugnai
+
+# After env created:
+# > pip install git+https://github.com/TorchSpatiotemporal/tsl.git@dev
+#
+# Alternatively, for developer options,
+# > cd ..
+# > git clone https://github.com/TorchSpatiotemporal/tsl.git
+# > cd tsl
+# > git checkout dev
+# > pip install -e .

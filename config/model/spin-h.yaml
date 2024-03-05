@@ -1,0 +1,20 @@
+# @package _global_
+
+#### Model params #############################################################
+model:
+  name: spin-h
+  hparams:
+    h_size: 32
+    z_size: 32
+    z_heads: 2
+    n_layers: 3
+    eta: 3
+    message_layers: 1
+    reweigh: "softmax"
+    update_z_cross: True
+    norm: True
+    spatial_aggr: "add"
+
+dataset:
+  connectivity:
+    layout: edge_index

@@ -1,0 +1,6 @@
+# @package _global_
+
+lr_scheduler:
+  name: ExponentialLR
+  hparams:
+    gamma: 0.5
