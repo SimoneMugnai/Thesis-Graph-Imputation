@@ -1,0 +1,14 @@
+# From root directory of the project
+$ PYTHONPATH=. python experiments/run_realworld.py model=grin dataset=la dataset/missing=block optimizer=adam lr_scheduler=multistep logger=neptune
+# On the server to use GPU 0
+$ PYTHONPATH=. CUDA_VISIBLE_DEVICES=0 python experiments/run_realworld.py model=grin dataset=la dataset/missing=block optimizer=adam lr_scheduler=multistep logger=neptune
+# Changing the number of epochs
+$ PYTHONPATH=. python experiments/run_realworld.py model=grin dataset=la dataset/missing=block optimizer=adam lr_scheduler=multistep logger=neptune epochs=200
+# Changing the hidden size of the model
+$ PYTHONPATH=. python experiments/run_realworld.py model=grin dataset=la dataset/missing=block optimizer=adam lr_scheduler=multistep logger=neptune model.hparams.hidden_size=32
+# Sweeping over multiple hyperparameters ...
+$ PYTHONPATH=. python experiments/run_realworld.py model=grin dataset=la dataset/missing=block optimizer=adam lr_scheduler=multistep logger=neptune model.hparams.hidden_size=32,64,128,256 --multirun  # or simply -m
+# ... datasets, ...
+$ PYTHONPATH=. python experiments/run_realworld.py model=grin dataset=la,bay,air dataset/missing=point,block logger=neptune -m
+# ... or seeds (in this case 4 runs with same hparams but different seeds thanks to fictitious param 'task').
+$ PYTHONPATH=. python experiments/run_realworld.py model=grin dataset=la dataset/missing=point logger=neptune +task=1,2,3,4 -m

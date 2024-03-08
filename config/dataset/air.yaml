@@ -18,7 +18,6 @@ dataset:
     threshold: 0.1
     include_self: False
     layout: csr
-  make_graph_connected: True
   covariates:
     year: True
     day: True

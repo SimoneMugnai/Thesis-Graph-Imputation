@@ -17,8 +17,7 @@ dataset:
     method: distance
     threshold: 0.1
     include_self: False
-    layout: csr
-  make_graph_connected: False
+    layout: csr # csr, edge_index
   covariates:
     year: False
     day: True

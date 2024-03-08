@@ -1,0 +1,22 @@
+defaults:
+  - default
+  - override logger: neptune
+  - _self_
+
+default_tags:
+  - ${model.name}
+  - ${dataset.name}
+  - sweep_0
+
+#### Experiment params ########################################################
+hydra:
+  mode: MULTIRUN
+  sweeper:
+    params:
+      dataset: la, bay
+      dataset/mode: point, block, block_prop
+      +task: 1, 2  # fictitious 'task' parameter just to run multiple times with same hparams but different seeds
+      model: grin, rnn, dcrnn
+
+# Example usage:
+# $ CUDA_VISIBLE_DEVICES=0 python experiments/run_realworld.py config=sweep_example  # no need to add --multirun or -m flag

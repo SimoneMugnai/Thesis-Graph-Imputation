@@ -12,7 +12,7 @@ from tsl.experiment import Experiment, NeptuneLogger
 from tsl.metrics import torch_metrics
 from tsl.nn import models as tsl_models
 
-from lib.nn import models
+from lib.nn import baselines
 from lib.nn.engines import MissingDataPredictor
 from lib.utils import find_devices, add_missing_values, suppress_known_warnings
 
@@ -24,13 +24,13 @@ def get_model_class(model_str):
         pass
     # Baseline models  ##################################################
     elif model_str == 'rnni':
-        model = models.RNNIPredictionModel
+        model = baselines.RNNIPredictionModel
     elif model_str == 'grin':
-        model = models.GRINPredictionModel
+        model = baselines.GRINPredictionModel
     elif model_str == 'spin-h':
-        model = models.SPINHierarchicalPredictionModel
+        model = baselines.SPINHierarchicalPredictionModel
     elif model_str == 'grud':
-        model = models.GRUDModel
+        model = baselines.GRUDModel
     # Forecasting models  ###############################################
     elif model_str == 'rnn':
         model = tsl_models.RNNModel
@@ -58,17 +58,17 @@ def get_dataset(dataset_cfg):
     # Get original mask
     mask = dataset.get_mask().copy()  # [time, node, feature]
     # Add missing values to dataset
-    if dataset_cfg.mode.name != 'normal':
+    if dataset_cfg.missing.name != 'normal':
         add_missing_values(
             dataset,
-            p_fault=dataset_cfg.mode.p_fault,
-            p_noise=dataset_cfg.mode.p_noise,
-            min_seq=dataset_cfg.mode.min_seq,
-            max_seq=dataset_cfg.mode.max_seq,
-            p_propagation=dataset_cfg.mode.get('p_propagation', 0),
+            p_fault=dataset_cfg.missing.p_fault,
+            p_noise=dataset_cfg.missing.p_noise,
+            min_seq=dataset_cfg.missing.min_seq,
+            max_seq=dataset_cfg.missing.max_seq,
+            p_propagation=dataset_cfg.missing.get('p_propagation', 0),
             connectivity=adj,
-            propagation_hops=dataset_cfg.mode.get('propagation_hops', 0),
-            seed=dataset_cfg.mode.seed)
+            propagation_hops=dataset_cfg.missing.get('propagation_hops', 0),
+            seed=dataset_cfg.missing.seed)
         dataset.set_mask(dataset.training_mask)
     return dataset, adj, mask
 
@@ -97,10 +97,11 @@ def run(cfg: DictConfig):
     assert len(u)
     ndim = max(u_.ndim for u_ in u)
     u = np.concatenate([
-        np.repeat(u_[:, None], dataset.n_nodes, 1) if u_.ndim < ndim else u_
-        for u_ in u
-    ],
-                       axis=-1)
+        np.repeat(u_[:, None], dataset.n_nodes, 1)
+        if u_.ndim < ndim else u_
+        for u_ in u],
+        axis=-1
+    )
 
     # Get data and set missing values to nan
     data = dataset.dataframe()
@@ -123,7 +124,7 @@ def run(cfg: DictConfig):
     # Scale input features
     scaler_cfg = cfg.get('scaler')
     if scaler_cfg is not None:
-        scale_axis = (0, ) if scaler_cfg.axis == 'node' else (0, 1)
+        scale_axis = (0,) if scaler_cfg.axis == 'node' else (0, 1)
         scaler_cls = getattr(scalers, f'{scaler_cfg.method}Scaler')
         transform = dict(target=scaler_cls(axis=scale_axis))
     else:
@@ -294,8 +295,8 @@ def run(cfg: DictConfig):
         k: predictor._check_metric(m)
         for k, m in log_metrics.items()
     },
-                                              prefix='test_',
-                                              postfix='_unmasked')
+        prefix='test_',
+        postfix='_unmasked')
     trainer.test(predictor, dataloaders=dm.test_dataloader())
 
     if exp_logger is not None:
