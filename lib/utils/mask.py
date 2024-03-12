@@ -9,7 +9,7 @@ from tsl.ops.imputation import to_missing_values_dataset
 from tsl.typing import SparseTensArray, DataArray
 from tsl.utils import ensure_list
 
-from lib.pooling import connectivity_to_adj_t
+from lib.utils import connectivity_to_adj_t
 
 
 def sample_mask(shape,

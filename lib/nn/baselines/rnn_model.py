@@ -184,7 +184,7 @@ class RNNIPredictionModel(BaseModel):
         # readout
         out = self.readout(h)  # -> [batch time features]
 
-        return out, x_hat, None, None
+        return out, x_hat
 
     def predict(self, x: Tensor, input_mask: Optional[Tensor],
                 u: Optional[Tensor] = None,
@@ -284,4 +284,4 @@ class GRUDModel(BaseModel):
         else:
             x_hat = None
 
-        return out, x_hat, None, None
+        return out, x_hat

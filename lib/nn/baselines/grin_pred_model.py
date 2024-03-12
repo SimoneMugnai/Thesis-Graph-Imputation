@@ -89,7 +89,7 @@ class GRINPredictionModel(BaseModel):
         h = fwd_h[-1, :, -1]  # select last state of last layer
         y_hat = self.prediction_readout(h)
 
-        return y_hat, imputations, None, None
+        return y_hat, imputations
 
     def predict(self,
                 x: Tensor,

@@ -1,13 +1,12 @@
 from typing import Callable, Mapping, Optional, Type, Union, List, Tuple
 
-import matplotlib.pyplot as plt
 import torch
 from lightning.pytorch.utilities import grad_norm
 from torch_geometric.data.storage import recursive_apply
 from torchmetrics import Metric
 from tsl.engines import Predictor
 
-from lib.nn.models import SPINHierarchicalPredictionModel
+from lib.nn.baselines import SPINHierarchicalPredictionModel
 
 
 class MissingDataPredictor(Predictor):

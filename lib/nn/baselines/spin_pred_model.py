@@ -89,4 +89,4 @@ class SPINHierarchicalPredictionModel(SPINHierarchicalModel):
 
         y_hat = x_hat[:, w:]
 
-        return y_hat, imputations, None, None
+        return y_hat, imputations
