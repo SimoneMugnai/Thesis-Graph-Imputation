@@ -52,6 +52,11 @@ def get_dataset(dataset_cfg):
         dataset = tsl_datasets.MetrLA(impute_zeros=True)
     elif name.startswith('bay'):
         dataset = tsl_datasets.PemsBay()
+    elif name.startswith('Large'):
+        years = [2019]
+        dataset = tsl_datasets.LargeST(year = years,
+                                       subset = next((s for s in ["GLA", "GBA", "SD"] if s in name), "CA"),  
+                                       imputation_mode = "nearest")
     else:
         raise ValueError(f"Dataset {name} not available.")
     adj = dataset.get_connectivity(**dataset_cfg.connectivity)

@@ -1,0 +1,35 @@
+# @package _global_
+defaults:
+  - _self_
+  - missing@dataset.missing: block  # Name of the dataset
+
+#### Dataset params ###########################################################
+dataset:
+  name: LargeST
+  missing:
+    seed: 231   # also number of nodes
+    min_seq: 4  # 4 hours
+    max_seq: 12 # 12 hours
+  splitting:
+     val_len: 0.1
+     test_len: 0.2
+  connectivity:
+    method: precomputed
+    threshold: 0.1
+    include_self: False
+    layout: csr
+  covariates:
+    year: True
+    day: True
+    weekday: True
+    mask: ${mask_as_exog}
+
+#### Windowing params #########################################################
+window: 24
+horizon: 12
+stride: 1
+
+scaler:
+  method: Standard
+  axis: graph
+  scale_target: False
