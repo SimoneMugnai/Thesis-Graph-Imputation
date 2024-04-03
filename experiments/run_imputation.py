@@ -21,7 +21,7 @@ from lib.utils import find_devices, add_missing_values, suppress_known_warnings
 
 
 
-def get_model_class(model_str):
+
 def get_model_class(model_str):
     #Baseline_imputation method:###
     if model_str == 'rnni':
