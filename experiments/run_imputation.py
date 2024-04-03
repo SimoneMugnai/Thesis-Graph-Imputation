@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import torch
 import tsl.datasets as tsl_datasets
 from neptune.utils import stringify_unsupported
@@ -11,6 +12,8 @@ from tsl.data.preprocessing import scalers
 from tsl.experiment import Experiment, NeptuneLogger
 from tsl.metrics import torch_metrics
 from tsl.nn import models as tsl_models
+from tsl import LazyLoader
+
 
 from lib.nn import baselines
 from lib.nn.engines import MissingDataPredictor
@@ -18,6 +21,7 @@ from lib.utils import find_devices, add_missing_values, suppress_known_warnings
 
 
 
+def get_model_class(model_str):
 def get_model_class(model_str):
     #Baseline_imputation method:###
     if model_str == 'rnni':
@@ -28,11 +32,6 @@ def get_model_class(model_str):
         model = baselines.SPINHierarchicalPredictionModel
     elif model_str == 'grud':
         model = baselines.GRUDModel
-    # Forecasting models  ###############################################
-    elif model_str == 'rnn':
-        model = tsl_models.RNNModel
-    elif model_str == 'dcrnn':
-        model = tsl_models.DCRNNModel
     else:
         raise NotImplementedError(f'Model "{model_str}" not available.')
 
@@ -56,6 +55,7 @@ def get_dataset(dataset_cfg):
                                        imputation_mode = "nearest")
     else:
         raise ValueError(f"Dataset {name} not present.")
+    
     #adjacency matrix 
     adj = dataset.get_connectivity(**dataset_cfg.connectivity)
     #original mask
@@ -74,6 +74,26 @@ def get_dataset(dataset_cfg):
             seed=dataset_cfg.missing.seed)
         dataset.set_mask(dataset.training_mask)
     return dataset, adj, mask
+
+# save the imputed data for train validation and test set
+
+def process_and_save_predictions(dataloader, predictor, file_name_prefix):
+    predictions = []
+    #iterate in every batch
+    for batch_idx, batch in enumerate(dataloader):
+        pred = predictor.predict_step(batch, batch_idx)
+        #from tensor to numpy array and append
+        predictions.append(pred['y_hat'].cpu().numpy())
+    
+    # Convert list of numpy arrays to a single numpy array and remove the last dimension
+    predictions = np.concatenate(predictions, axis=0).squeeze(-1)
+    
+    # Flatten the array to convert it to a dataframe
+    flattened_data = predictions.reshape(predictions.shape[0], -1)   
+    df_predictions = pd.DataFrame(flattened_data)
+    
+    # Save to an HDF5 file with a specific key
+    df_predictions.to_hdf(f'{file_name_prefix}_imputed_dataset.h5', key='imputed', mode='w')
 
 
 
@@ -105,7 +125,8 @@ def run(cfg: DictConfig):
 
     data = dataset.dataframe()
     masked_data = data.where(mask.reshape(mask.shape[0], -1), np.nan)
-    data = masked_data.interpolate(method='linear')
+    
+    #data = masked_data.interpolate(method='linear')
     #dataset in torch
     torch_dataset = SpatioTemporalDataset(target = data,
                                           connectivity = adj,
@@ -246,19 +267,12 @@ def run(cfg: DictConfig):
 
     trainer.test(predictor, dataloaders=dm.test_dataloader())
 
-    from torchmetrics import MetricCollection
-    predictor.test_metrics = MetricCollection(metrics={
-        k: predictor._check_metric(m)
-        for k, m in log_metrics.items()
-    },
-        prefix='test_',
-        postfix='_unmasked')
-    trainer.test(predictor, dataloaders=dm.test_dataloader())
+    process_and_save_predictions(dm.train_dataloader(), predictor, 'train')
+    process_and_save_predictions(dm.val_dataloader(), predictor, 'val')
+    process_and_save_predictions(dm.test_dataloader(), predictor, 'test')
 
-    if exp_logger is not None:
-        exp_logger.finalize('success')
+   
 
-    return result
 
 
 if __name__ == '__main__':
