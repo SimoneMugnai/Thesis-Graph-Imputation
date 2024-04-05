@@ -1,4 +1,5 @@
 import numpy as np
+import os
 import pandas as pd
 import torch
 import tsl.datasets as tsl_datasets
@@ -51,7 +52,7 @@ def get_dataset(dataset_cfg):
     elif name.startswith('Large'):
         years = [2017, 2018, 2019]
         dataset = tsl_datasets.LargeST(year = years,
-                                       subset = next((s for s in ["GLA", "GBA", "SD"] if s in name), "CA"),  
+                                       subset = next((s for s in ["GLA", "GBA", "SD"] if s in name), "SD"),  
                                        imputation_mode = "nearest")
     else:
         raise ValueError(f"Dataset {name} not present.")
@@ -77,7 +78,7 @@ def get_dataset(dataset_cfg):
 
 # save the imputed data for train validation and test set
 
-def process_and_save_predictions(dataloader, predictor, file_name_prefix):
+def process_and_save_predictions(dataloader, predictor, file_name_prefix,cfg):
     predictions = []
     #iterate in every batch
     for batch_idx, batch in enumerate(dataloader):
@@ -92,8 +93,12 @@ def process_and_save_predictions(dataloader, predictor, file_name_prefix):
     flattened_data = predictions.reshape(predictions.shape[0], -1)   
     df_predictions = pd.DataFrame(flattened_data)
     
+    #create the directory to dinamically save the imputation
+    directory_path = os.path.join('/home/smugnai/Thesis_Imputation', cfg.dir_imp)
+    os.makedirs(directory_path, exist_ok=True)
+    
     # Save to an HDF5 file with a specific key
-    df_predictions.to_hdf(f'{file_name_prefix}_imputed_dataset.h5', key='imputed', mode='w')
+    df_predictions.to_hdf(f'{cfg.dir_imp}/{file_name_prefix}_imputed_dataset.h5', key='imputed', mode='w')
 
 
 
@@ -267,9 +272,11 @@ def run(cfg: DictConfig):
 
     trainer.test(predictor, dataloaders=dm.test_dataloader())
 
+    
+
     process_and_save_predictions(dm.train_dataloader(), predictor, 'train')
     process_and_save_predictions(dm.val_dataloader(), predictor, 'val')
-    process_and_save_predictions(dm.test_dataloader(), predictor, 'test')
+    process_and_save_predictions(dm.test_dataloader(), predictor, 'test',cfg)
 
    
 

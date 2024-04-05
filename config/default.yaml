@@ -14,6 +14,9 @@ hydra:
     dir: logs/${now:%Y-%m-%d-%H-%M-%S}
     subdir: ${model.name}/${dataset.name}/${hydra.job.num}
 
+#####where to save imputed value  
+dir_imp:  imputed_val/${model.name}/${dataset.name}
+
 tags: ${cat:${default_tags},${run_tags}}
 
 default_tags:
