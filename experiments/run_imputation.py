@@ -274,8 +274,8 @@ def run(cfg: DictConfig):
 
     
 
-    process_and_save_predictions(dm.train_dataloader(), predictor, 'train')
-    process_and_save_predictions(dm.val_dataloader(), predictor, 'val')
+    process_and_save_predictions(dm.train_dataloader(), predictor, 'train',cfg)
+    process_and_save_predictions(dm.val_dataloader(), predictor, 'val',cfg)
     process_and_save_predictions(dm.test_dataloader(), predictor, 'test',cfg)
 
    
