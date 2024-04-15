@@ -253,35 +253,41 @@ def run(cfg: DictConfig):
     #testing
 
     trainer.test(predictor, dataloaders=dm.test_dataloader())
+    
+    
     #saving dataset predictions
 
+    #creating the dataloader that contain the whole dataset
     dm.testset = np.arange(0, len(torch_dataset))
     dm.splitter = None
     
-
+    #extract all the original timestamp to ensure no missing timestep later (pytorch dataset problem lower number of rows)
+    #reset index to get just the timest
     all_timestamps = pd.DataFrame({
-     'Timestamp': data.iloc[:, 1]
+     'Timestamp': data.reset_index().iloc[:, 0]
      })
-    timestamps_df = all_timestamps.reset_index()
-    timestamps_only_df = timestamps_df[['index']]
    
-
-    all_timestamps = pd.to_datetime(timestamps_only_df['index'])
-    all_timestamps = pd.DataFrame(all_timestamps)
     all_timestamps.columns = ['Timestamp']
-   
-   
-   
+    all_timestamps = pd.to_datetime(all_timestamps['Timestamp'])
+    all_timestamps = pd.DataFrame(all_timestamps)
+
     
+   
+   
+   
+    #get the timestamp to associate with the prediction
     time_stamp = torch_dataset.data_timestamps(indices=dm.testset.indices)
     torch_dataset.data_timestamps(indices=dm.testset.indices)
 
+    #retrieve timestamp
     first_timestamps = pd.DataFrame(time_stamp['window'][:, 0], columns=['Timestamp'])
+
+    #calculate predictiom, is a dictionary with y_hat and tensor (as the various keys)
     y_hat = trainer.predict(predictor, dm.test_dataloader(batch_size=cfg.batch_size))
     y_hat_tensors = [entry['y_hat'] for entry in y_hat]
     combined_tensor = torch.cat(y_hat_tensors, dim=0).squeeze(-1)
-    N = combined_tensor.shape[0]  # Total number of samples
-    reshaped_tensor = combined_tensor.reshape(N, -1)  # Reshape to [N, 2484]
+    #N = combined_tensor.shape[0]  # Total number of samples
+    reshaped_tensor = combined_tensor.reshape(combined_tensor.shape[0], -1)  # Reshape to match initial dataset
 
 
     df = pd.DataFrame(reshaped_tensor.numpy())
@@ -289,10 +295,10 @@ def run(cfg: DictConfig):
     
     imputed_dataset = pd.concat([first_timestamps, df], axis=1)
 
-
+    #merge on the differences between all the timestamp and the one associated with the prediction.
     final_dataset = all_timestamps.merge(imputed_dataset, on='Timestamp', how='outer')
 
-# Sorting by Timestamp
+    # Sorting by Timestamp
     final_dataset = final_dataset.sort_values(by='Timestamp')
     final_dataset.interpolate(method='linear', inplace=True)
     

@@ -93,17 +93,16 @@ def compute_statistics(file_path,n):
     
     # Load the dataset and ensure the Timestamp column is parsed as datetime
     df = pd.read_csv(file_path)
-    reshape_param= (df.shape[1]-2)
-    print(type(a))
-    print(type(int(a)))
-  
 
+    #calculate parameter to reshape excluding the timestamp cplumn
+    reshape_param= int((df.shape[1]-2)/n)
     
+    #calculate mean and std with jumps equal to horizon size 
     result = df.iloc[:, 2:].apply(lambda x: np.mean(x.values.reshape(-1, n), axis=1), axis=1)
     laland = df.iloc[:, 2:].apply(lambda x: np.std(x.values.reshape(-1, n), axis=1), axis=1)
     
-
-    imputation_mean = np.concatenate(result.values).reshape(-1,reshape_param) #length of the array divided by hprizon.
+    #concatenate back all the result
+    imputation_mean = np.concatenate(result.values).reshape(-1,reshape_param) #length of the array divided by horizon.
     imputation_std= np.concatenate(laland.values).reshape(-1,reshape_param)
 
 
@@ -124,14 +123,19 @@ def run(cfg: DictConfig):
     u = []
     if cfg.dataset.covariates.year:
         u.append(dataset.datetime_encoded('year').values)
+        
     if cfg.dataset.covariates.day:
         u.append(dataset.datetime_encoded('day').values)
+        
     if cfg.dataset.covariates.weekday:
         u.append(dataset.datetime_onehot('weekday').values)
+
     if cfg.dataset.covariates.mask:
-        u.append(mask.astype(np.float32))
+        u.append(mask.astype(np.float32)) 
+
     u.append(mean_data)
     u.append(var_data)
+    
 
     # Concatenate covariates
     assert len(u)
@@ -145,7 +149,6 @@ def run(cfg: DictConfig):
 
     # Get data and set missing values to nan
     data = dataset.dataframe()
-    print(data.size())
     masked_data = data.where(mask.reshape(mask.shape[0], -1), np.nan)
 
     # Fill nan with Last Observation Carried Forward
