@@ -33,6 +33,8 @@ def get_model_class(model_str):
         model = baselines.SPINHierarchicalPredictionModel
     elif model_str == 'grud':
         model = baselines.GRUDModel
+    elif model_str == 'birnni':
+        model = tsl_models.BiRNNImputerModel
     else:
         raise NotImplementedError(f'Model "{model_str}" not available.')
 
@@ -44,6 +46,7 @@ def get_dataset(dataset_cfg):
     name: str = dataset_cfg.name
     if name.startswith('la'):
         dataset = tsl_datasets.MetrLA(impute_zeros=True)
+        print(dataset)
     elif name.startswith('bay'):
         dataset = tsl_datasets.PemsBay()
     elif name.startswith('air'):
@@ -76,29 +79,6 @@ def get_dataset(dataset_cfg):
         dataset.set_mask(dataset.training_mask)
     return dataset, adj, mask
 
-# save the imputed data for train validation and test set
-
-def process_and_save_predictions(dataloader, predictor, file_name_prefix,cfg):
-    predictions = []
-    #iterate in every batch
-    for batch_idx, batch in enumerate(dataloader):
-        pred = predictor.predict_step(batch, batch_idx)
-        #from tensor to numpy array and append
-        predictions.append(pred['y_hat'].cpu().numpy())
-    
-    # Convert list of numpy arrays to a single numpy array and remove the last dimension
-    predictions = np.concatenate(predictions, axis=0).squeeze(-1)
-    
-    # Flatten the array to convert it to a dataframe
-    flattened_data = predictions.reshape(predictions.shape[0], -1)   
-    df_predictions = pd.DataFrame(flattened_data)
-    
-    #create the directory to dinamically save the imputation
-    directory_path = os.path.join('/home/smugnai/Thesis_Imputation', cfg.dir_imp)
-    os.makedirs(directory_path, exist_ok=True)
-    
-    # Save to an HDF5 file with a specific key
-    df_predictions.to_hdf(f'{cfg.dir_imp}/{file_name_prefix}_imputed_dataset.h5', key='imputed', mode='w')
 
 
 
@@ -131,7 +111,7 @@ def run(cfg: DictConfig):
     data = dataset.dataframe()
     masked_data = data.where(mask.reshape(mask.shape[0], -1), np.nan)
     
-    #data = masked_data.interpolate(method='linear')
+    data = masked_data.ffill().bfill()
     #dataset in torch
     torch_dataset = SpatioTemporalDataset(target = data,
                                           connectivity = adj,
@@ -159,6 +139,8 @@ def run(cfg: DictConfig):
                                   batch_size = cfg.batch_size,
                                   workers = cfg.workers )
     dm.setup()
+
+    
 
 
     #get the model
@@ -271,14 +253,58 @@ def run(cfg: DictConfig):
     #testing
 
     trainer.test(predictor, dataloaders=dm.test_dataloader())
+    #saving dataset predictions
 
+    dm.testset = np.arange(0, len(torch_dataset))
+    dm.splitter = None
     
 
-    process_and_save_predictions(dm.train_dataloader(), predictor, 'train',cfg)
-    process_and_save_predictions(dm.val_dataloader(), predictor, 'val',cfg)
-    process_and_save_predictions(dm.test_dataloader(), predictor, 'test',cfg)
-
+    all_timestamps = pd.DataFrame({
+     'Timestamp': data.iloc[:, 1]
+     })
+    timestamps_df = all_timestamps.reset_index()
+    timestamps_only_df = timestamps_df[['index']]
    
+
+    all_timestamps = pd.to_datetime(timestamps_only_df['index'])
+    all_timestamps = pd.DataFrame(all_timestamps)
+    all_timestamps.columns = ['Timestamp']
+   
+   
+   
+    
+    time_stamp = torch_dataset.data_timestamps(indices=dm.testset.indices)
+    torch_dataset.data_timestamps(indices=dm.testset.indices)
+
+    first_timestamps = pd.DataFrame(time_stamp['window'][:, 0], columns=['Timestamp'])
+    y_hat = trainer.predict(predictor, dm.test_dataloader(batch_size=cfg.batch_size))
+    y_hat_tensors = [entry['y_hat'] for entry in y_hat]
+    combined_tensor = torch.cat(y_hat_tensors, dim=0).squeeze(-1)
+    N = combined_tensor.shape[0]  # Total number of samples
+    reshaped_tensor = combined_tensor.reshape(N, -1)  # Reshape to [N, 2484]
+
+
+    df = pd.DataFrame(reshaped_tensor.numpy())
+    
+    
+    imputed_dataset = pd.concat([first_timestamps, df], axis=1)
+
+
+    final_dataset = all_timestamps.merge(imputed_dataset, on='Timestamp', how='outer')
+
+# Sorting by Timestamp
+    final_dataset = final_dataset.sort_values(by='Timestamp')
+    final_dataset.interpolate(method='linear', inplace=True)
+    
+    
+
+    #create the directory to dinamically save the imputation
+    directory_path = os.path.join('/home/smugnai/Thesis_Imputation', cfg.dir_imp)
+    os.makedirs(directory_path, exist_ok=True)
+    file_path = os.path.join(directory_path, f'imputed_dataset_with_timestamps.csv')
+
+    final_dataset.to_csv(file_path)
+
 
 
 

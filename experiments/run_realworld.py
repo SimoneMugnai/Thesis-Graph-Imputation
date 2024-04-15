@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import torch
 import tsl.datasets as tsl_datasets
 from neptune.utils import stringify_unsupported
@@ -6,11 +7,12 @@ from omegaconf import DictConfig
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
 from tsl import logger
-from tsl.data import SpatioTemporalDataset, SpatioTemporalDataModule
+from tsl.data import SpatioTemporalDataset, SpatioTemporalDataModule, ImputationDataset
 from tsl.data.preprocessing import scalers
 from tsl.experiment import Experiment, NeptuneLogger
 from tsl.metrics import torch_metrics
 from tsl.nn import models as tsl_models
+from tsl.nn.blocks.decoders import LinearReadout
 
 from lib.nn import baselines
 from lib.nn.engines import MissingDataPredictor
@@ -36,6 +38,8 @@ def get_model_class(model_str):
         model = tsl_models.RNNModel
     elif model_str == 'dcrnn':
         model = tsl_models.DCRNNModel
+    elif model_str == 'birnni':
+        model = tsl_models.BiRNNImputerModel
     else:
         raise NotImplementedError(f'Model "{model_str}" not available.')
     return model
@@ -55,7 +59,7 @@ def get_dataset(dataset_cfg):
     elif name.startswith('Large'):
         years = [2019]
         dataset = tsl_datasets.LargeST(year = years,
-                                       subset = next((s for s in ["GLA", "GBA", "SD"] if s in name), "CA"),  
+                                       subset = next((s for s in ["GLA", "GBA", "SD"] if s in name), "SD"),  
                                        imputation_mode = "nearest")
     else:
         raise ValueError(f"Dataset {name} not available.")
@@ -78,15 +82,44 @@ def get_dataset(dataset_cfg):
     return dataset, adj, mask
 
 
+
+def average_row(row,cfg):
+    return np.mean(row.values.reshape(-1,cfg), axis=1)
+
+def std_row(row,cfg):
+    return np.std(row.values.reshape(-1,cfg),axis=1)
+
+def compute_statistics(file_path,n):
+    
+    # Load the dataset and ensure the Timestamp column is parsed as datetime
+    df = pd.read_csv(file_path)
+    reshape_param= (df.shape[1]-2)
+    print(type(a))
+    print(type(int(a)))
+  
+
+    
+    result = df.iloc[:, 2:].apply(lambda x: np.mean(x.values.reshape(-1, n), axis=1), axis=1)
+    laland = df.iloc[:, 2:].apply(lambda x: np.std(x.values.reshape(-1, n), axis=1), axis=1)
+    
+
+    imputation_mean = np.concatenate(result.values).reshape(-1,reshape_param) #length of the array divided by hprizon.
+    imputation_std= np.concatenate(laland.values).reshape(-1,reshape_param)
+
+
+    return imputation_mean, imputation_std
+
+
+
 def run(cfg: DictConfig):
     ########################################
     # Get Dataset                          #
     ########################################
     dataset, adj, original_mask = get_dataset(cfg.dataset)
-
+   
     # Get mask
     mask = dataset.mask
-
+    mean_data, var_data = compute_statistics('imputed_val/rnni/bay_block/imputed_dataset_with_timestamps.csv', n=cfg.horizon)
     # Get covariates
     u = []
     if cfg.dataset.covariates.year:
@@ -97,6 +130,8 @@ def run(cfg: DictConfig):
         u.append(dataset.datetime_onehot('weekday').values)
     if cfg.dataset.covariates.mask:
         u.append(mask.astype(np.float32))
+    u.append(mean_data)
+    u.append(var_data)
 
     # Concatenate covariates
     assert len(u)
@@ -110,23 +145,28 @@ def run(cfg: DictConfig):
 
     # Get data and set missing values to nan
     data = dataset.dataframe()
+    print(data.size())
     masked_data = data.where(mask.reshape(mask.shape[0], -1), np.nan)
 
     # Fill nan with Last Observation Carried Forward
     data = masked_data.ffill().bfill()
 
-    torch_dataset = SpatioTemporalDataset(target=data,
-                                          mask=mask,
-                                          covariates=dict(u=u),
-                                          connectivity=adj,
-                                          horizon=cfg.horizon,
-                                          window=cfg.window,
-                                          stride=cfg.stride)
+   
 
-    # Add mask to model's inputs as 'input_mask'
+
+
+    torch_dataset = SpatioTemporalDataset(target=data,
+                                         mask=mask,
+                                         covariates=dict(u=u),
+                                         connectivity=adj,
+                                         horizon=cfg.horizon,
+                                         window=cfg.window,
+                                         stride=cfg.stride)
+
+    # # Add mask to model's inputs as 'input_mask'
     torch_dataset.update_input_map(input_mask=['mask'])
 
-    # Scale input features
+
     scaler_cfg = cfg.get('scaler')
     if scaler_cfg is not None:
         scale_axis = (0,) if scaler_cfg.axis == 'node' else (0, 1)
