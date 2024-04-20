@@ -5,15 +5,15 @@ model:
   name: spin-h
   hparams:
     h_size: 32
-    z_size: 32
-    z_heads: 2
-    n_layers: 3
+    z_size: 128
+    z_heads: 4
     eta: 3
+    n_layers: 5
     message_layers: 1
-    reweigh: "softmax"
-    update_z_cross: True
+    update_z_cross: False
     norm: True
-    spatial_aggr: "add"
+    reweigh: 'softmax'
+    spatial_aggr: 'softmax'
 
 dataset:
   connectivity:

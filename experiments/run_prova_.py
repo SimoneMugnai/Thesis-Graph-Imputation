@@ -8,13 +8,13 @@ from omegaconf import DictConfig
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
 from tsl import logger
-from tsl.data import SpatioTemporalDataset, SpatioTemporalDataModule, ImputationDataset
+from tsl.data import SpatioTemporalDataset, SpatioTemporalDataModule
 from tsl.data.preprocessing import scalers
 from tsl.experiment import Experiment, NeptuneLogger
 from tsl.metrics import torch_metrics
 from tsl.nn import models as tsl_models
-from tsl.transforms import MaskInput
-from tsl.engines import Imputer
+import tsl.datasets as tsl_datasets
+
 
 from lib.nn import baselines
 from lib.nn.engines import MissingDataPredictor
@@ -26,11 +26,13 @@ from lib.utils import find_devices, add_missing_values, suppress_known_warnings
 def get_model_class(model_str):
     #Baseline_imputation method:###
     if model_str == 'rnni':
-        model = tsl_models.RNNImputerModel
+        model = baselines.RNNIPredictionModel
     elif model_str == 'grin':
-        model =baselines.GRINModel
+        model = baselines.GRINPredictionModel
     elif model_str == 'spin-h':
-        model = baselines.SPINHierarchicalModel
+        model = baselines.SPINHierarchicalPredictionModel
+    elif model_str == 'grud':
+        model = baselines.GRUDModel
     elif model_str == 'birnni':
         model = tsl_models.BiRNNImputerModel
     else:
@@ -61,6 +63,7 @@ def get_dataset(dataset_cfg):
     #adjacency matrix 
     adj = dataset.get_connectivity(**dataset_cfg.connectivity)
     #original mask
+    mask = dataset.get_mask().copy()
     #new mask missing values:
     if dataset_cfg.missing.name != 'normal':
         add_missing_values(
@@ -74,13 +77,13 @@ def get_dataset(dataset_cfg):
             propagation_hops=dataset_cfg.missing.get('propagation_hops', 0),
             seed=dataset_cfg.missing.seed)
         dataset.set_mask(dataset.training_mask)
-    return dataset, adj
+    return dataset, adj, mask
 
 
 
 
 def run(cfg: DictConfig):
-    dataset,adj = get_dataset(cfg.dataset)
+    dataset,adj,original_mask = get_dataset(cfg.dataset)
     mask = dataset.mask
     #covariates
     u = []
@@ -108,31 +111,17 @@ def run(cfg: DictConfig):
     data = dataset.dataframe()
     masked_data = data.where(mask.reshape(mask.shape[0], -1), np.nan)
     
-    
+    data = masked_data.ffill().bfill()
     #dataset in torch
-    
-    torch_dataset = ImputationDataset(target=data,
-                                      mask=dataset.training_mask,
-                                      eval_mask=dataset.eval_mask,
-                                      covariates=dict(u=u),
-                                      transform=MaskInput(),
-                                      connectivity=adj,
-                                      window=cfg.window,
-                                      stride=cfg.stride,
-                                      )
+    torch_dataset = SpatioTemporalDataset(target = data,
+                                          connectivity = adj,
+                                          mask = mask,
+                                          covariates = dict(u=u),
+                                          horizon = cfg.horizon,
+                                          window = cfg.window,
+                                          stride = cfg.stride)
     
     torch_dataset.update_input_map(input_mask=['mask'])
-
-    # torch_dataset = SpatioTemporalDataset(target = data,
-    #                                     connectivity = adj,
-    #                                     mask = mask,
-    #                                     covariates = dict(u=u),
-    #                                     horizon = cfg.horizon,
-    #                                     window = cfg.window,
-    #                                     stride = cfg.stride,
-    #                                     delay = cfg.delay)
-    
-    # torch_dataset.update_input_map(input_mask=['mask'])
 
     #scale input
     scaler_cfg = cfg.get("scaler")
@@ -143,26 +132,28 @@ def run(cfg: DictConfig):
     else: 
         transform = None
 
-    dm = SpatioTemporalDataModule(dataset = torch_dataset,
+    dm = SpatioTemporalDataModule( dataset = torch_dataset,
                                   scalers = transform,
                                   splitter = dataset.get_splitter(**cfg.dataset.splitting),
                                   mask_scaling = True,
                                   batch_size = cfg.batch_size,
                                   workers = cfg.workers )
-    dm.setup(stage="fit")
+    dm.setup()
 
     
 
 
     #get the model
     model_cls = get_model_class(cfg.model.name)
+
     d_exog = torch_dataset.input_map.u.shape[-1] if 'u' in torch_dataset else 0
 
-    model_kwargs = dict(n_nodes=torch_dataset.n_nodes,
-                        input_size=torch_dataset.n_channels,
-                        exog_size=d_exog,
+    model_kwargs = dict(n_nodes = torch_dataset.n_nodes,
+                        input_size = torch_dataset.n_channels,
+                        mask_size = torch_dataset.n_channels,
+                        exog_size = d_exog,
                         output_size = torch_dataset.n_channels,
-                        )
+                        horizon = torch_dataset.horizon)
     
     model_cls.filter_model_args_(model_kwargs)
     model_kwargs.update(cfg.model.hparams)
@@ -170,7 +161,7 @@ def run(cfg: DictConfig):
 
     #predictors
 
-    #imputation loss 
+    #imputation loss (if i'm using  this experiment  just for imputation no?)
     loss_fn = torch_metrics.MaskedMAE()
 
     log_metrics = {
@@ -186,24 +177,28 @@ def run(cfg: DictConfig):
     else:
         scheduler_class = scheduler_kwargs = None
 
-    
-    
-    imputer = Imputer(model_class=model_cls,
-                      model_kwargs=model_kwargs,
-                      optim_class=getattr(torch.optim, cfg.optimizer.name),
-                      optim_kwargs=cfg.optimizer.hparams,
-                      loss_fn=loss_fn,
-                      metrics=log_metrics,
-                      scheduler_class=scheduler_class,
-                      scheduler_kwargs=scheduler_kwargs,
-                      scale_target=False if scaler_cfg is None else scaler_cfg.scale_target,
-                      whiten_prob=cfg.whiten_prob,
-                      warm_up_steps=cfg.imputation_warm_up)
+    #predictior
+    predictor = MissingDataPredictor(model_class = model_cls,
+                                     model_kwargs= model_kwargs,
+                                     optim_class= getattr(torch.optim,cfg.optimizer.name),
+                                     optim_kwargs= cfg.optimizer.hparams,
+                                     loss_fn = loss_fn,
+                                     metrics = log_metrics,
+                                     scheduler_class= scheduler_class,
+                                     scheduler_kwargs=scheduler_kwargs,
+                                     whiten_prob= cfg.whiten_prob,
+                                     imputation_loss_fn= loss_fn,
+                                     log_lr= cfg.get("log_lr",True),
+                                     imputation_loss_weight= cfg.imputation_loss_weight,
+                                     log_grad_norm=cfg.get('log_grad_norm', False),
+                                     scale_target= False if scaler_cfg is None else scaler_cfg.scale_target,
+                                     imputation_warm_up= cfg.imputation_warm_up
+                                     )
     
     #logger
 
     run_args = exp.get_config_dict()
-    run_args['model']['trainable_parameters'] = imputer.trainable_parameters
+    run_args['model']['trainable_parameters'] = predictor.trainable_parameters
     run_args = stringify_unsupported(run_args)
 
     if cfg.get('logger') is None:
@@ -241,34 +236,54 @@ def run(cfg: DictConfig):
                       gradient_clip_val = cfg.grad_clip_val,
                       callbacks=[early_stop_callback, checkpoint_callback])
     
-    trainer.fit(imputer, train_dataloaders = dm.train_dataloader(),
+    load_model_path = cfg.get('load_model_path')
+
+    if load_model_path is not None:
+        predictor.load_model(load_model_path)
+    else:
+        trainer.fit(predictor,
+                    train_dataloaders = dm.train_dataloader(),
                     val_dataloaders= dm.val_dataloader())
+        predictor.load_model(checkpoint_callback.best_model_path)
+    
+    predictor.freeze()
+
+    result = checkpoint_callback.best_model_score.item()
 
     #testing
 
-    imputer.load_model(checkpoint_callback.best_model_path)
-
-    imputer.freeze()
-    trainer.test(imputer, datamodule=dm.test_dataloader())
-
-
-
+    trainer.test(predictor, dataloaders=dm.test_dataloader())
+    
+    
     #saving dataset predictions
 
     #creating the dataloader that contain the whole dataset
     dm.testset = np.arange(0, len(torch_dataset))
     dm.splitter = None
     
+    #extract all the original timestamp to ensure no missing timestep later (pytorch dataset problem lower number of rows)
+    #reset index to get just the timest
+    all_timestamps = pd.DataFrame({
+     'Timestamp': data.reset_index().iloc[:, 0]
+     })
+   
+    all_timestamps.columns = ['Timestamp']
+    all_timestamps = pd.to_datetime(all_timestamps['Timestamp'])
+    all_timestamps = pd.DataFrame(all_timestamps)
+
+    
+   
+   
    
     #get the timestamp to associate with the prediction
     time_stamp = torch_dataset.data_timestamps(indices=dm.testset.indices)
-    #torch_dataset.data_timestamps(indices=dm.testset.indices)
+    torch_dataset.data_timestamps(indices=dm.testset.indices)
 
     #retrieve timestamp
     first_timestamps = pd.DataFrame(time_stamp['window'][:, 0], columns=['Timestamp'])
 
     #calculate predictiom, is a dictionary with y_hat and tensor (as the various keys)
-    y_hat = trainer.predict(imputer, dm.test_dataloader(batch_size=cfg.batch_size))
+    y_hat = trainer.predict(predictor, dm.test_dataloader(batch_size=cfg.batch_size))
     y_hat_tensors = [entry['y_hat'] for entry in y_hat]
     combined_tensor = torch.cat(y_hat_tensors, dim=0).squeeze(-1)
     #N = combined_tensor.shape[0]  # Total number of samples
@@ -280,9 +295,12 @@ def run(cfg: DictConfig):
     
     imputed_dataset = pd.concat([first_timestamps, df], axis=1)
 
+    #merge on the differences between all the timestamp and the one associated with the prediction.
+    final_dataset = all_timestamps.merge(imputed_dataset, on='Timestamp', how='outer')
+
     # Sorting by Timestamp
-    final_dataset = imputed_dataset.sort_values(by='Timestamp')
-    
+    final_dataset = final_dataset.sort_values(by='Timestamp')
+    final_dataset.interpolate(method='linear', inplace=True)
     
     
 
@@ -292,6 +310,7 @@ def run(cfg: DictConfig):
     file_path = os.path.join(directory_path, f'imputed_dataset_with_timestamps.csv')
 
     final_dataset.to_csv(file_path)
+
 
 
 

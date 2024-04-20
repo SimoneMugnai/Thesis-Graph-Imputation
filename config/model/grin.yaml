@@ -5,13 +5,15 @@ model:
   name: grin
   hparams:
     hidden_size: 64
-    embedding_size: null
+    ff_size: 64
+    embedding_size: 8
+    n_layers: 1
     kernel_size: 2
     decoder_order: 1
     layer_norm: False
-    n_layers: 1
-    activation: "relu"
-    dropout: 0.
+    dropout: 0
+    ff_dropout: 0
+    merge_mode: 'mlp'
 
 # Imputation
 imputation_loss: True

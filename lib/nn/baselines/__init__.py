@@ -3,5 +3,7 @@ from .stgnns import (TimeThenGraphIsoModel,
                      TimeAndGraphIsoModel,
                      TimeAndGraphAnisoModel)
 from .grin_pred_model import GRINPredictionModel
+from .grin import GRINModel
 from .spin_pred_model import SPINHierarchicalPredictionModel
 from .rnn_model import RNNIPredictionModel, GRUDModel
+from .spin_h import SPINHierarchicalModel

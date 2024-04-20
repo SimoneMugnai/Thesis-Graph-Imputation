@@ -26,7 +26,8 @@ dataset:
 
 #### Windowing params #########################################################
 window: 24
-horizon: 6
+horizon: 24
+delay: -24
 stride: 1
 
 scaler:

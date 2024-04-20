@@ -45,4 +45,4 @@ scaler:
 whiten_prob: null
 imputation_loss: False
 imputation_loss_weight: 1.
-imputation_warm_up: 6
+imputation_warm_up: 0 # if you change it you should change horizon to be windows-warm_up
