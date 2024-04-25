@@ -60,8 +60,9 @@ def get_dataset(dataset_cfg):
     
     #adjacency matrix 
     adj = dataset.get_connectivity(**dataset_cfg.connectivity)
-    #original mask
-    #new mask missing values:
+
+    # Add missing values in 'eval_mask': now 'training_mask' becomes
+    # the new mask
     if dataset_cfg.missing.name != 'normal':
         add_missing_values(
             dataset,
@@ -73,7 +74,6 @@ def get_dataset(dataset_cfg):
             connectivity=adj,
             propagation_hops=dataset_cfg.missing.get('propagation_hops', 0),
             seed=dataset_cfg.missing.seed)
-        dataset.set_mask(dataset.training_mask)
     return dataset, adj
 
 
@@ -81,7 +81,6 @@ def get_dataset(dataset_cfg):
 
 def run(cfg: DictConfig):
     dataset,adj = get_dataset(cfg.dataset)
-    mask = dataset.mask
     #covariates
     u = []
     if cfg.dataset.covariates.year:
@@ -90,8 +89,6 @@ def run(cfg: DictConfig):
         u.append(dataset.datetime_encoded('day').values)
     if cfg.dataset.covariates.weekday:
         u.append(dataset.datetime_onehot('weekday').values)
-    if cfg.dataset.covariates.mask:
-        u.append(mask.astype(np.float32))
 
     # covariates union
     assert len(u)
@@ -105,34 +102,17 @@ def run(cfg: DictConfig):
         axis=-1
     )
 
-    data = dataset.dataframe()
-    masked_data = data.where(mask.reshape(mask.shape[0], -1), np.nan)
-    
-    
     #dataset in torch
-    
-    torch_dataset = ImputationDataset(target=data,
+    torch_dataset = ImputationDataset(target=dataset.dataframe(),
                                       mask=dataset.training_mask,
                                       eval_mask=dataset.eval_mask,
                                       covariates=dict(u=u),
                                       transform=MaskInput(),
                                       connectivity=adj,
                                       window=cfg.window,
-                                      stride=cfg.stride,
-                                      )
+                                      stride=cfg.stride)
     
     torch_dataset.update_input_map(input_mask=['mask'])
-
-    # torch_dataset = SpatioTemporalDataset(target = data,
-    #                                     connectivity = adj,
-    #                                     mask = mask,
-    #                                     covariates = dict(u=u),
-    #                                     horizon = cfg.horizon,
-    #                                     window = cfg.window,
-    #                                     stride = cfg.stride,
-    #                                     delay = cfg.delay)
-    
-    # torch_dataset.update_input_map(input_mask=['mask'])
 
     #scale input
     scaler_cfg = cfg.get("scaler")
