@@ -77,6 +77,7 @@ def get_dataset(dataset_cfg):
     return dataset, adj
 
 
+# check valori eval mask 1 siano 0 in training
 
 
 def run(cfg: DictConfig):
@@ -142,6 +143,7 @@ def run(cfg: DictConfig):
                         input_size=torch_dataset.n_channels,
                         exog_size=d_exog,
                         output_size = torch_dataset.n_channels,
+                        mask= mask
                         )
     
     model_cls.filter_model_args_(model_kwargs)
@@ -229,7 +231,7 @@ def run(cfg: DictConfig):
     imputer.load_model(checkpoint_callback.best_model_path)
 
     imputer.freeze()
-    trainer.test(imputer, datamodule=dm.test_dataloader())
+    trainer.test(imputer, datamodule=dm)
 
 
 
@@ -238,8 +240,16 @@ def run(cfg: DictConfig):
     #creating the dataloader that contain the whole dataset
     dm.testset = np.arange(0, len(torch_dataset))
     dm.splitter = None
-    
+
+    all_timestamps = pd.DataFrame({
+     'Timestamp': data.reset_index().iloc[:, 0]
+     })
    
+    all_timestamps.columns = ['Timestamp']
+    all_timestamps = pd.to_datetime(all_timestamps['Timestamp'])
+    all_timestamps = pd.DataFrame(all_timestamps)
+    
+ 
     #get the timestamp to associate with the prediction
     time_stamp = torch_dataset.data_timestamps(indices=dm.testset.indices)
     #torch_dataset.data_timestamps(indices=dm.testset.indices)
@@ -247,23 +257,25 @@ def run(cfg: DictConfig):
     #retrieve timestamp
     first_timestamps = pd.DataFrame(time_stamp['window'][:, 0], columns=['Timestamp'])
 
-    #calculate predictiom, is a dictionary with y_hat and tensor (as the various keys)
-    y_hat = trainer.predict(imputer, dm.test_dataloader(batch_size=cfg.batch_size))
+    #calculate prediction, is a dictionary with y_hat and tensor (as the various keys)
+    imputer.eval()
+    with torch.no_grad():
+         y_hat = trainer.predict(imputer, dm.test_dataloader(batch_size=cfg.batch_size))
     y_hat_tensors = [entry['y_hat'] for entry in y_hat]
     combined_tensor = torch.cat(y_hat_tensors, dim=0).squeeze(-1)
     #N = combined_tensor.shape[0]  # Total number of samples
     reshaped_tensor = combined_tensor.reshape(combined_tensor.shape[0], -1)  # Reshape to match initial dataset
+    imputed_data_np = reshaped_tensor.numpy()
 
-
-    df = pd.DataFrame(reshaped_tensor.numpy())
-    
-    
-    imputed_dataset = pd.concat([first_timestamps, df], axis=1)
 
     # Sorting by Timestamp
-    final_dataset = imputed_dataset.sort_values(by='Timestamp')
+     #merge on the differences between all the timestamp and the one associated with the prediction.
+    final_timestamp = all_timestamps.merge(first_timestamps, how='outer')
+    timestamps_np = final_timestamp['Timestamp'].values
+   
     
-    
+    #To do, save it as npz and concatenate timestamp as np.array 
+    #to then use it for calculating statistics.
     
 
     #create the directory to dinamically save the imputation
@@ -271,7 +283,7 @@ def run(cfg: DictConfig):
     os.makedirs(directory_path, exist_ok=True)
     file_path = os.path.join(directory_path, f'imputed_dataset_with_timestamps.csv')
 
-    final_dataset.to_csv(file_path)
+    np.savez(file_path, predictions=imputed_data_np, timestamps=timestamps_np)
 
 
 

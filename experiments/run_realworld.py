@@ -118,7 +118,7 @@ def run(cfg: DictConfig):
    
     # Get mask
     mask = dataset.mask
-    mean_data, var_data = compute_statistics('imputed_val/rnni/bay_block/imputed_dataset_with_timestamps.csv', n=cfg.horizon)
+   # mean_data, var_data = compute_statistics('imputed_val/rnni/bay_block/imputed_dataset_with_timestamps.csv', n=cfg.horizon)
     # Get covariates
     u = []
     if cfg.dataset.covariates.year:
@@ -133,8 +133,8 @@ def run(cfg: DictConfig):
     if cfg.dataset.covariates.mask:
         u.append(mask.astype(np.float32)) 
 
-    u.append(mean_data)
-    u.append(var_data)
+    # u.append(mean_data)
+    # u.append(var_data)
     
 
     # Concatenate covariates

@@ -23,7 +23,7 @@ from tsl.metrics import numpy as numpy_metrics
 from tsl.metrics import torch as torch_metrics
 from tsl.nn import models as tsl_models
 from tsl.utils.casting import torch_to_numpy
-from lib.utils import find_devices, add_missing_values, suppress_known_warnings
+from lib.utils import find_devices, add_missing_values, suppress_known_warnings,prediction_dataframe
 from lib.nn import baselines
 import tsl.datasets as tsl_datasets
 
@@ -97,6 +97,23 @@ def get_dataset(dataset_cfg):
 def run(cfg: DictConfig):
     dataset,adj = get_dataset(cfg.dataset)
     mask = dataset.mask
+
+    data = np.load('imputed_val/grin/la_block/imputed_dataset_with_timestamps.csv.npz')
+    predictions = data['predictions']
+    timestamps = data['timestamps']
+    timestamps_list = timestamps.tolist()
+
+# Now you can use the prediction_dataframe function
+# Make sure you adjust the column names to match your actual data
+    mean_imputation = prediction_dataframe(
+    y=predictions,
+    index=timestamps,
+    columns=['Timestamp', 'tensor'],  # Replace with your actual feature names
+    aggregate_by='mean'
+)
+
+
+
     #covariates
     u = []
     if cfg.dataset.covariates.year:
@@ -107,6 +124,7 @@ def run(cfg: DictConfig):
         u.append(dataset.datetime_onehot('weekday').values)
     if cfg.dataset.covariates.mask:
         u.append(mask.astype(np.float32))
+    u.append(mean_imputation)
     
     # covariates union
     assert len(u)
