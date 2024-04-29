@@ -1,0 +1,52 @@
+defaults:
+  - _self_
+  - logger: null
+  - optimizer: adam
+  - lr_scheduler: multistep
+  - dataset: la
+  - model: grin
+
+#### Experiment params ########################################################
+hydra:
+  run:
+    dir: logs/${model.name}/${dataset.name}/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: logs/${now:%Y-%m-%d-%H-%M-%S}
+    subdir: ${model.name}/${dataset.name}/${hydra.job.num}
+
+#####where to save imputed value  
+dir_imp:  imputed_val/${model.name}/${dataset.name}
+
+tags: ${cat:${default_tags},${run_tags}}
+
+default_tags:
+  - ${model.name}
+  - ${dataset.name}
+
+run_tags: []
+
+workers: 0
+num_threads: 1
+
+#### Windowing params #########################################################
+window: 12
+
+
+
+#### Training params ##########################################################
+epochs: 200
+patience: 30
+batch_size: 32
+train_batches: 300  # 1.0
+grad_clip_val: 5
+scaler:
+  method: Standard
+  axis: graph
+  scale_target: False
+
+#### Imputation params ########################################################
+whiten_prob: 0.05
+imputation_warm_up: 0 
+
+prediction_loss_weight: null
+mask_as_exog: False
