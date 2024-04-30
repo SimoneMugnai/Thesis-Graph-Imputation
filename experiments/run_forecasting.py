@@ -98,21 +98,15 @@ def run(cfg: DictConfig):
     dataset,adj = get_dataset(cfg.dataset)
     mask = dataset.mask
 
-    data = np.load('imputed_val/grin/la_block/imputed_dataset_with_timestamps.csv.npz')
+    data = np.load('imputed_val/grin/la_block/imputed_dataset_with_timestamps.csv.npz',allow_pickle=True)
+
     predictions = data['predictions']
     timestamps = data['timestamps']
-    timestamps_list = timestamps.tolist()
+    #timestamps_list = timestamps.tolist()
 
 # Now you can use the prediction_dataframe function
 # Make sure you adjust the column names to match your actual data
-    mean_imputation = prediction_dataframe(
-    y=predictions,
-    index=timestamps,
-    columns=['Timestamp', 'tensor'],  # Replace with your actual feature names
-    aggregate_by='mean'
-)
-
-
+    
 
     #covariates
     u = []
@@ -124,7 +118,7 @@ def run(cfg: DictConfig):
         u.append(dataset.datetime_onehot('weekday').values)
     if cfg.dataset.covariates.mask:
         u.append(mask.astype(np.float32))
-    u.append(mean_imputation)
+    #u.append(df_agg)
     
     # covariates union
     assert len(u)
@@ -273,6 +267,6 @@ if __name__ == '__main__':
     suppress_known_warnings()
     exp = Experiment(run_fn=run,
                     config_path='../config/',
-                    config_name='default')
+                    config_name='default_forecasting')
     res = exp.run()
     logger.info(res)
