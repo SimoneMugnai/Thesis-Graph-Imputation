@@ -18,7 +18,7 @@ from tsl.engines import Imputer
 
 from lib.nn import baselines
 from lib.nn.engines import MissingDataPredictor
-from lib.utils import find_devices, add_missing_values, suppress_known_warnings
+from lib.utils import find_devices, add_missing_values, suppress_known_warnings, ensure_list, prediction_dataframe
 
 
 
@@ -130,7 +130,7 @@ def run(cfg: DictConfig):
                                   mask_scaling = True,
                                   batch_size = cfg.batch_size,
                                   workers = cfg.workers )
-    dm.setup(stage="fit")
+    dm.setup()
 
     
 
@@ -143,7 +143,6 @@ def run(cfg: DictConfig):
                         input_size=torch_dataset.n_channels,
                         exog_size=d_exog,
                         output_size = torch_dataset.n_channels,
-                        mask= mask
                         )
     
     model_cls.filter_model_args_(model_kwargs)
@@ -238,43 +237,31 @@ def run(cfg: DictConfig):
     #saving dataset predictions
 
     #creating the dataloader that contain the whole dataset
-    dm.testset = np.arange(0, len(torch_dataset))
+    dm.testset = np.arange(0, len(dm.torch_dataset))
     dm.splitter = None
-
-    all_timestamps = pd.DataFrame({
-     'Timestamp': data.reset_index().iloc[:, 0]
-     })
-   
-    all_timestamps.columns = ['Timestamp']
-    all_timestamps = pd.to_datetime(all_timestamps['Timestamp'])
-    all_timestamps = pd.DataFrame(all_timestamps)
-    
- 
-    #get the timestamp to associate with the prediction
-    time_stamp = torch_dataset.data_timestamps(indices=dm.testset.indices)
-    #torch_dataset.data_timestamps(indices=dm.testset.indices)
-
-    #retrieve timestamp
-    first_timestamps = pd.DataFrame(time_stamp['window'][:, 0], columns=['Timestamp'])
-
-    #calculate prediction, is a dictionary with y_hat and tensor (as the various keys)
     imputer.eval()
+
+    # Predict on the test dataset without updating weights
     with torch.no_grad():
-         y_hat = trainer.predict(imputer, dm.test_dataloader(batch_size=cfg.batch_size))
-    y_hat_tensors = [entry['y_hat'] for entry in y_hat]
-    combined_tensor = torch.cat(y_hat_tensors, dim=0).squeeze(-1)
-    #N = combined_tensor.shape[0]  # Total number of samples
-    reshaped_tensor = combined_tensor.reshape(combined_tensor.shape[0], -1)  # Reshape to match initial dataset
-    imputed_data_np = reshaped_tensor.numpy()
+        y_hat_raw = trainer.predict(imputer, dm.testset.indices)
+        y_hat_tensors = [entry['y_hat'] for entry in y_hat_raw]
+        combined_tensor = torch.cat(y_hat_tensors, dim=0).squeeze(-1).detach().cpu().numpy()  # Combine and remove last dimension if singular
+
+        combined_tensor = torch.cat(y_hat_tensors, dim=0).detach().cpu().numpy().reshape(y_hat_tensors.shape[:3])
+
+    # Reshape tensor to match the initial dataset dimensions
+    reshaped_tensor = combined_tensor.reshape(combined_tensor.shape[0], -1)
+    imputed_data_np = reshaped_tensor.detach().cpu().numpy()
 
 
-    # Sorting by Timestamp
-     #merge on the differences between all the timestamp and the one associated with the prediction.
-    final_timestamp = all_timestamps.merge(first_timestamps, how='outer')
-    timestamps_np = final_timestamp['Timestamp'].values
+    # Prediction dataframe aggregation
+    index = dm.torch_dataset.data_timestamps(dm.testset.indices)['window']
+    aggregate_by = "mean"
+    aggr_methods = ensure_list(aggregate_by)
+    df_hats = prediction_dataframe(imputed_data_np, index, dataset.dataframe().columns, aggregate_by=aggr_methods)
+    df_hats = dict(zip(aggr_methods, df_hats))
    
     
-    #To do, save it as npz and concatenate timestamp as np.array 
     #to then use it for calculating statistics.
     
 
@@ -283,7 +270,7 @@ def run(cfg: DictConfig):
     os.makedirs(directory_path, exist_ok=True)
     file_path = os.path.join(directory_path, f'imputed_dataset_with_timestamps.csv')
 
-    np.savez(file_path, predictions=imputed_data_np, timestamps=timestamps_np)
+    np.savez(file_path, predictions=imputed_data_np, timestamps=index)
 
 
 
@@ -291,7 +278,7 @@ if __name__ == '__main__':
     suppress_known_warnings()
     exp = Experiment(run_fn=run,
                      config_path='../config/',
-                     config_name='default')
+                     config_name='default_imputation')
     res = exp.run()
     logger.info(res)
 
