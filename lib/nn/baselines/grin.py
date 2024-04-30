@@ -108,8 +108,9 @@ class GRINModel(BaseModel):
                 input_mask: Optional[Tensor] = None,
                 u: Optional[Tensor] = None) -> Tuple[Tensor, List, None, None]:
         """"""
+        if u is not None and u.ndim ==3:
+            u = u.unsqueeze(-2).expand(-1, -1, x.size(-2), -1)
 
-        
         # x: [batch, steps, nodes, channels]
         fwd_out, fwd_pred, fwd_repr, _ = self.fwd_gril(x,
                                                        edge_index,

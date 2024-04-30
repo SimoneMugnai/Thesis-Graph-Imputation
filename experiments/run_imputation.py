@@ -175,6 +175,7 @@ def run(cfg: DictConfig):
                       optim_kwargs=cfg.optimizer.hparams,
                       loss_fn=loss_fn,
                       metrics=log_metrics,
+                      impute_only_missing=False,
                       scheduler_class=scheduler_class,
                       scheduler_kwargs=scheduler_kwargs,
                       scale_target=False if scaler_cfg is None else scaler_cfg.scale_target,
@@ -243,22 +244,21 @@ def run(cfg: DictConfig):
 
     # Predict on the test dataset without updating weights
     with torch.no_grad():
-        y_hat_raw = trainer.predict(imputer, dm.testset.indices)
+        y_hat_raw = trainer.predict(imputer, dataloaders=dm.test_dataloader())
         y_hat_tensors = [entry['y_hat'] for entry in y_hat_raw]
         combined_tensor = torch.cat(y_hat_tensors, dim=0).squeeze(-1).detach().cpu().numpy()  # Combine and remove last dimension if singular
-
-        combined_tensor = torch.cat(y_hat_tensors, dim=0).detach().cpu().numpy().reshape(y_hat_tensors.shape[:3])
-
-    # Reshape tensor to match the initial dataset dimensions
-    reshaped_tensor = combined_tensor.reshape(combined_tensor.shape[0], -1)
-    imputed_data_np = reshaped_tensor.detach().cpu().numpy()
-
 
     # Prediction dataframe aggregation
     index = dm.torch_dataset.data_timestamps(dm.testset.indices)['window']
     aggregate_by = "mean"
     aggr_methods = ensure_list(aggregate_by)
-    df_hats = prediction_dataframe(imputed_data_np, index, dataset.dataframe().columns, aggregate_by=aggr_methods)
+    # Flatten windows
+    index = pd.DatetimeIndex(index.reshape(-1))
+    combined_tensor = combined_tensor.reshape(-1, *combined_tensor.shape[2:])
+    #
+    df_hats = prediction_dataframe(combined_tensor, index,
+                                   columns=dataset._columns_multiindex(),
+                                   aggregate_by=aggr_methods)
     df_hats = dict(zip(aggr_methods, df_hats))
    
     
@@ -268,9 +268,16 @@ def run(cfg: DictConfig):
     #create the directory to dinamically save the imputation
     directory_path = os.path.join('/home/smugnai/Thesis_Imputation', cfg.dir_imp)
     os.makedirs(directory_path, exist_ok=True)
-    file_path = os.path.join(directory_path, f'imputed_dataset_with_timestamps.csv')
+    file_path = os.path.join(directory_path, f'imputed_dataset_with_timestamps.npz')
 
-    np.savez(file_path, predictions=imputed_data_np, timestamps=index)
+    np.savez(file_path, predictions=combined_tensor, timestamps=index)
+
+    # ... or
+    df = pd.DataFrame(data=combined_tensor, index=index,
+                      columns=dataset._columns_multiindex())
+    file_path = os.path.join(directory_path, f'imputed_dataset_with_timestamps.h5')
+    df.to_hdf(file_path, key='imputed_dataset', mode='w', complevel=3)
+
 
 
 
