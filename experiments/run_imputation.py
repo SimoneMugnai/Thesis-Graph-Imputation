@@ -255,24 +255,12 @@ def run(cfg: DictConfig):
     # Flatten windows
     index = pd.DatetimeIndex(index.reshape(-1))
     combined_tensor = combined_tensor.reshape(-1, *combined_tensor.shape[2:])
-    #
-    df_hats = prediction_dataframe(combined_tensor, index,
-                                   columns=dataset._columns_multiindex(),
-                                   aggregate_by=aggr_methods)
-    df_hats = dict(zip(aggr_methods, df_hats))
-   
-    
-    #to then use it for calculating statistics.
-    
+    # df_hats = dict(zip(aggr_methods, df_hats))
+     
 
     #create the directory to dinamically save the imputation
     directory_path = os.path.join('/home/smugnai/Thesis_Imputation', cfg.dir_imp)
     os.makedirs(directory_path, exist_ok=True)
-    file_path = os.path.join(directory_path, f'imputed_dataset_with_timestamps.npz')
-
-    np.savez(file_path, predictions=combined_tensor, timestamps=index)
-
-    # ... or
     df = pd.DataFrame(data=combined_tensor, index=index,
                       columns=dataset._columns_multiindex())
     file_path = os.path.join(directory_path, f'imputed_dataset_with_timestamps.h5')
