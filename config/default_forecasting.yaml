@@ -5,7 +5,8 @@ defaults:
   - lr_scheduler: multistep
   - dataset: la
   - model: rnn
-  - imputation_model: none # Default imputation model
+  - imputation_model: none
+   
 
 #### Experiment params ########################################################
 hydra:
@@ -16,6 +17,7 @@ hydra:
     subdir: ${model.name}/${dataset.name}/${hydra.job.num}
 
 ###### Load imputation from #######################
+
 dir_imputation: "imputed_val/${imputation_model.name}/${dataset.name}/imputed_dataset_with_timestamps.h5"
 
 tags: ${cat:${default_tags},${run_tags}}
@@ -23,6 +25,7 @@ tags: ${cat:${default_tags},${run_tags}}
 default_tags:
   - ${model.name}
   - ${dataset.name}
+  - ${imputation_model.name}
 
 run_tags: []
 
@@ -36,7 +39,7 @@ stride: 1
 
 
 #### Training params ##########################################################
-epochs: 1
+epochs: 200
 patience: 30
 batch_size: 32
 train_batches: 300  # 1.0

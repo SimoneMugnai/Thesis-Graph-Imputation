@@ -1,6 +1,3 @@
-from typing import Optional
-import os
-
 import numpy as np
 import pandas as pd
 
@@ -21,7 +18,6 @@ from tsl.engines import Predictor
 from tsl.experiment import Experiment, NeptuneLogger
 from tsl.metrics import torch as torch_metrics
 from tsl.nn import models as tsl_models
-from tsl.utils.casting import torch_to_numpy
 from lib.utils import find_devices, add_missing_values, suppress_known_warnings,prediction_dataframe,prediction_dataframe_v2
 from lib.nn import baselines
 import tsl.datasets as tsl_datasets
@@ -100,14 +96,15 @@ def run(cfg: DictConfig):
   
          # Construct the full path to the HDF5 file
     if cfg.imputation_model.name != "none":  
-    # Load the HDF5 file using the dynamically constructed path
+    #Load the HDF5 file using the dynamically constructed path
         df_imputed = pd.read_hdf(cfg.dir_imputation, key='imputed_dataset')
-        
-        # Perform aggregation
+    
+    #  Perform aggregation
         aggr_by = ['mean', 'sd']
         results = prediction_dataframe_v2(df_imputed.values, df_imputed.index, df_imputed.columns, aggregate_by=aggr_by)
         df_agg_mean = results['mean']
         df_agg_sd = results['sd']
+        df_agg_sd = df_agg_sd.ffill().bfill()
 
 
     #covariates
@@ -120,7 +117,7 @@ def run(cfg: DictConfig):
         u.append(dataset.datetime_onehot('weekday').values)
     if cfg.dataset.covariates.mask:
         u.append(mask.astype(np.float32))
-    if cfg.imputation_model.name != "none": 
+    if cfg.imputation_model.name != "none":
         u.append(df_agg_mean.values)
         u.append(df_agg_sd.values)
     
@@ -141,6 +138,10 @@ def run(cfg: DictConfig):
 
     # Fill nan with Last Observation Carried Forward
     data = masked_data.ffill().bfill()
+
+    #from the experiment filling the missing values using directly the imputed values
+    #improved the performances
+    #data = masked_data.combine_first(df_agg_mean)
 
     torch_dataset = SpatioTemporalDataset(
         target=data,
