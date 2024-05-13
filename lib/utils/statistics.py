@@ -57,3 +57,17 @@ def prediction_dataframe_v2(y, index, columns=None, aggregate_by='mean'):
             raise ValueError(f'Invalid aggregation method "{method}". Choose from {list(aggregation_methods.keys())}.')
     
     return results
+
+
+def calculate_residuals(actual, imputed):
+    # Compute residuals (actual - imputed)
+    residuals = actual - imputed
+    
+    # Ensure residuals are positive by taking the absolute value
+    residuals = residuals.abs()
+    
+    # Replace NaN values with 0
+    residuals = residuals.fillna(0)
+    
+    return residuals
+

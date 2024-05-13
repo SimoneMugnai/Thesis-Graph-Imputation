@@ -1,0 +1,29 @@
+# @package _global_
+
+#### Model params #############################################################
+model:
+  name: evolvegcn
+  hparams:
+    hidden_size: 64
+    n_layers: 2
+    norm: mean
+    cached: True
+    variant: O
+    root_weight: True
+
+#### Config overrides #########################################################
+dataset:
+  connectivity:
+    force_symmetric: True
+
+optimizer:
+  hparams:
+    lr: 0.005
+
+lr_scheduler:
+  name: MultiStepLR
+  hparams:
+    gamma: 0.1
+    milestones: [ 20, 30, 40 ]
+
+mask_as_exog: False

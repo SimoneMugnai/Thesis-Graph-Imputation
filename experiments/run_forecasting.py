@@ -18,7 +18,7 @@ from tsl.engines import Predictor
 from tsl.experiment import Experiment, NeptuneLogger
 from tsl.metrics import torch as torch_metrics
 from tsl.nn import models as tsl_models
-from lib.utils import find_devices, add_missing_values, suppress_known_warnings,prediction_dataframe,prediction_dataframe_v2
+from lib.utils import find_devices, add_missing_values, suppress_known_warnings,prediction_dataframe,prediction_dataframe_v2,calculate_residuals
 from lib.nn import baselines
 import tsl.datasets as tsl_datasets
 
@@ -92,19 +92,21 @@ def get_dataset(dataset_cfg):
 def run(cfg: DictConfig):
     dataset,adj = get_dataset(cfg.dataset)
     mask = dataset.mask
+    data = dataset.dataframe()
+    masked_data = data.where(mask.reshape(mask.shape[0], -1), np.nan)
 
-  
-         # Construct the full path to the HDF5 file
+
     if cfg.imputation_model.name != "none":  
-    #Load the HDF5 file using the dynamically constructed path
+        #Load the HDF5 file using the dynamically constructed path
         df_imputed = pd.read_hdf(cfg.dir_imputation, key='imputed_dataset')
-    
-    #  Perform aggregation
+        #Perform aggregation
         aggr_by = ['mean', 'sd']
         results = prediction_dataframe_v2(df_imputed.values, df_imputed.index, df_imputed.columns, aggregate_by=aggr_by)
         df_agg_mean = results['mean']
-        df_agg_sd = results['sd']
-        df_agg_sd = df_agg_sd.ffill().bfill()
+        df_agg_std = results['sd']
+        df_agg_std = df_agg_std.fillna(0)
+        residuals = calculate_residuals(masked_data, df_agg_mean)
+
 
 
     #covariates
@@ -118,8 +120,8 @@ def run(cfg: DictConfig):
     if cfg.dataset.covariates.mask:
         u.append(mask.astype(np.float32))
     if cfg.imputation_model.name != "none":
-        u.append(df_agg_mean.values)
-        u.append(df_agg_sd.values)
+        u.append(df_agg_std.values[...,None])
+        u.append(residuals.values[...,None])
     
     # covariates union
     assert len(u)
@@ -133,15 +135,14 @@ def run(cfg: DictConfig):
         axis=-1
     )
 
-    data = dataset.dataframe()
-    masked_data = data.where(mask.reshape(mask.shape[0], -1), np.nan)
+    
+    if cfg.imputation_model.name != "none":
+        #from the experiment filling the missing values using directly the imputed values
+        data = masked_data.combine_first(df_agg_mean)
+    else:
+        # Fill nan with Last Observation Carried Forward
+        data = masked_data.ffill().bfill()
 
-    # Fill nan with Last Observation Carried Forward
-    data = masked_data.ffill().bfill()
-
-    #from the experiment filling the missing values using directly the imputed values
-    #improved the performances
-    #data = masked_data.combine_first(df_agg_mean)
 
     torch_dataset = SpatioTemporalDataset(
         target=data,
