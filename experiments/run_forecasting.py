@@ -1,26 +1,22 @@
 import numpy as np
 import pandas as pd
-
 import torch
+import tsl.datasets as tsl_datasets
+from neptune.utils import stringify_unsupported
 from omegaconf import DictConfig
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
-from pytorch_lightning.loggers import Logger, TensorBoardLogger, WandbLogger
-
-from tsl.data.preprocessing import scalers
-from neptune.utils import stringify_unsupported
 from tsl import logger
 from tsl.data import SpatioTemporalDataModule, SpatioTemporalDataset
-from tsl.data.preprocessing import StandardScaler
-from tsl.datasets import MetrLA, PemsBay
-from tsl.datasets.pems_benchmarks import PeMS03, PeMS04, PeMS07, PeMS08
+from tsl.data.preprocessing import scalers
 from tsl.engines import Predictor
 from tsl.experiment import Experiment, NeptuneLogger
 from tsl.metrics import torch as torch_metrics
 from tsl.nn import models as tsl_models
-from lib.utils import find_devices, add_missing_values, suppress_known_warnings,prediction_dataframe,prediction_dataframe_v2,calculate_residuals
+
 from lib.nn import baselines
-import tsl.datasets as tsl_datasets
+from lib.utils import find_devices, add_missing_values, suppress_known_warnings, \
+    prediction_dataframe_v2, calculate_residuals
 
 
 def get_model_class(model_str):
@@ -33,14 +29,33 @@ def get_model_class(model_str):
         model = tsl_models.EvolveGCNModel  # (Pereja et al., AAAI 2020)
     elif model_str == 'agcrn':
         model = tsl_models.AGCRNModel  # (Bai et al., NeurIPS 2020)
-    elif model_str == 'grugcn':
-        model = tsl_models.GRUGCNModel  # (Guo et al., ICML 2022)
-    elif model_str == 'gatedgn':
-        model = tsl_models.GatedGraphNetworkModel  # (Satorras et al., 2022)
-    elif model_str == 'stcn':
-        model = tsl_models.STCNModel
+    # elif model_str == 'grugcn':
+    #     model = tsl_models.GRUGCNModel  # (Guo et al., ICML 2022)
+    # elif model_str == 'gatedgn':
+    #     model = tsl_models.GatedGraphNetworkModel  # (Satorras et al., 2022)
+    # elif model_str == 'stcn':
+    #     model = tsl_models.STCNModel
     elif model_str == 'transformer':
         model = tsl_models.TransformerModel
+    elif model_str == 'tts_imp':
+        model = baselines.TimeThenGraphIsoModel
+    elif model_str == 'tts_amp':
+        model = baselines.TimeThenGraphAnisoModel
+    elif model_str == 'tas_imp':
+        model = baselines.TimeAndGraphIsoModel
+    elif model_str == 'tas_amp':
+        model = baselines.TimeAndGraphAnisoModel
+    # Predictors with missing data  ###########################################
+    elif model_str == 'rnni':
+        model = baselines.RNNIPredictionModel
+    elif model_str == 'grin':
+        model = baselines.GRINPredictionModel
+    elif model_str == 'mtan':
+        model = baselines.MTANPredictionModel
+    elif model_str == 'spin-h':
+        model = baselines.SPINHierarchicalPredictionModel
+    elif model_str == 'grud':
+        model = baselines.GRUDModel
     # Temporal Models #########################################################
     elif model_str == 'ar':
         model = tsl_models.ARModel
