@@ -16,11 +16,12 @@ hydra:
     dir: logs/${now:%Y-%m-%d-%H-%M-%S}
     subdir: ${model.name}/${dataset.name}/${hydra.job.num}
 
+tags: ${cat:${default_tags},${run_tags}}
+
 ###### Load imputation from #######################
 
 dir_imputation: "imputed_val/${imputation_model.name}/${dataset.name}/imputed_dataset_with_timestamps.h5"
 
-tags: ${cat:${default_tags},${run_tags}}
 
 default_tags:
   - ${model.name}
@@ -31,6 +32,8 @@ run_tags: []
 
 workers: 0
 num_threads: 1
+
+mask_as_exog: False
 
 #### Windowing params #########################################################
 window: 12
@@ -49,5 +52,5 @@ scaler:
   axis: graph
   scale_target: False
 
-mask_as_exog: False
+
 
