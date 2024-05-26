@@ -15,6 +15,7 @@ from tsl.metrics import torch_metrics
 from tsl.nn import models as tsl_models
 from tsl.transforms import MaskInput
 from tsl.engines import Imputer
+from datetime import datetime
 
 from lib.nn import baselines
 from lib.nn.engines import MissingDataPredictor
@@ -250,8 +251,6 @@ def run(cfg: DictConfig):
 
     # Prediction dataframe aggregation
     index = dm.torch_dataset.data_timestamps(dm.testset.indices)['window']
-    aggregate_by = "mean"
-    aggr_methods = ensure_list(aggregate_by)
     # Flatten windows
     index = pd.DatetimeIndex(index.reshape(-1))
     combined_tensor = combined_tensor.reshape(-1, *combined_tensor.shape[2:])
@@ -263,7 +262,9 @@ def run(cfg: DictConfig):
     os.makedirs(directory_path, exist_ok=True)
     df = pd.DataFrame(data=combined_tensor, index=index,
                       columns=dataset._columns_multiindex())
-    file_path = os.path.join(directory_path, f'imputed_dataset_with_timestamps.h5')
+    
+    time_set = datetime.now().strftime("%Y%m%d_%H%M%S")
+    file_path = os.path.join(directory_path, f'imputed_dataset_with_timestamps_{time_set}.h5')
     df.to_hdf(file_path, key='imputed_dataset', mode='w', complevel=3)
 
 

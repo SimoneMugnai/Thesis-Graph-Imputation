@@ -23,6 +23,8 @@ dataset:
     day: True
     weekday: True
     mask: ${mask_as_exog}
+    std: True
+    residual: True 
 
 #### Windowing params #########################################################
 window: 24

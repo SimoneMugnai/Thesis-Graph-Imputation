@@ -20,3 +20,9 @@ model:
 dataset:
   connectivity:
     layout: csr 
+
+
+optimizer:
+  hparams:
+    lr: 0.001
+    weight_decay: 0.0001

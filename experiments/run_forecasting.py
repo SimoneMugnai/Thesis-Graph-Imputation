@@ -13,6 +13,7 @@ from tsl.engines import Predictor
 from tsl.experiment import Experiment, NeptuneLogger
 from tsl.metrics import torch as torch_metrics
 from tsl.nn import models as tsl_models
+import os
 
 from lib.nn import baselines
 from lib.utils import find_devices, add_missing_values, suppress_known_warnings, \
@@ -112,15 +113,29 @@ def run(cfg: DictConfig):
 
 
     if cfg.imputation_model.name != "none":  
-        #Load the HDF5 file using the dynamically constructed path
-        df_imputed = pd.read_hdf(cfg.dir_imputation, key='imputed_dataset')
+        hdf5_files = os.listdir(cfg.dir_imputation)
+        # Initialize an empty list to store dataframes
+        dataframes = []
+    
+        # Loop through each HDF5 file and load the dataset
+        for hdf5_file in hdf5_files:
+            file_path = os.path.join(cfg.dir_imputation, hdf5_file)
+            df_imputed = pd.read_hdf(file_path, key='imputed_dataset')
+            dataframes.append(df_imputed)
+
+        # Concatenate all dataframes into a single dataframe
+        combined_df = pd.concat(dataframes)
         #Perform aggregation
         aggr_by = ['mean', 'sd']
-        results = prediction_dataframe_v2(df_imputed.values, df_imputed.index, df_imputed.columns, aggregate_by=aggr_by)
+        results = prediction_dataframe_v2(combined_df.values, combined_df.index, combined_df.columns, aggregate_by=aggr_by)
         df_agg_mean = results['mean']
         df_agg_std = results['sd']
         df_agg_std = df_agg_std.fillna(0)
         residuals = calculate_residuals(masked_data, df_agg_mean)
+        #set to 0 the std when I have missing values in the original dataset
+        df_agg_std = df_agg_std.where(residuals != 0, 0)
+
+
 
 
 
@@ -134,9 +149,13 @@ def run(cfg: DictConfig):
         u.append(dataset.datetime_onehot('weekday').values)
     if cfg.dataset.covariates.mask:
         u.append(mask.astype(np.float32))
-    if cfg.imputation_model.name != "none":
+    if cfg.dataset.covariates.std:
         u.append(df_agg_std.values[...,None])
+    if cfg.dataset.covariates.residual:
         u.append(residuals.values[...,None])
+    # if cfg.imputation_model.name != "none":
+    #     u.append(df_agg_std.values[...,None])
+    #     u.append(residuals.values[...,None])
     
     # covariates union
     assert len(u)

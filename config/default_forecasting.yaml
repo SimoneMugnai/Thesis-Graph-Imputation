@@ -20,7 +20,8 @@ tags: ${cat:${default_tags},${run_tags}}
 
 ###### Load imputation from #######################
 
-dir_imputation: "imputed_val/${imputation_model.name}/${dataset.name}/imputed_dataset_with_timestamps.h5"
+
+dir_imputation: "imputed_val/${imputation_model.name}/${dataset.name}"
 
 
 default_tags:
@@ -33,7 +34,7 @@ run_tags: []
 workers: 0
 num_threads: 1
 
-mask_as_exog: False
+mask_as_exog: True
 
 #### Windowing params #########################################################
 window: 12

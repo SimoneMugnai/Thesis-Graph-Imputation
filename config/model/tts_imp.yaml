@@ -1,0 +1,23 @@
+# @package _global_
+
+#### Model params #############################################################
+model:
+  name: tts_imp
+  hparams:
+    hidden_size: 32
+    emb_size: 10             # Example embedding size, adjust as needed
+    add_embedding_before: 'encoding'
+    use_local_weights: null  # Or specify a value if needed
+    time_layers: 1
+    graph_layers: 1
+    root_weight: true
+    norm: 'none'
+    add_backward: false
+    cached: false
+    activation: 'elu'
+
+#### Config overrides #########################################################
+dataset:
+  connectivity:
+    layout: csr  # set this to use efficient message-passing implementation
+
