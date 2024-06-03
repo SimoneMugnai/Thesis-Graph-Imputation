@@ -153,9 +153,6 @@ def run(cfg: DictConfig):
         u.append(df_agg_std.values[...,None])
     if cfg.dataset.covariates.residual:
         u.append(residuals.values[...,None])
-    # if cfg.imputation_model.name != "none":
-    #     u.append(df_agg_std.values[...,None])
-    #     u.append(residuals.values[...,None])
     
     # covariates union
     assert len(u)
@@ -200,7 +197,7 @@ def run(cfg: DictConfig):
     dm = SpatioTemporalDataModule(dataset = torch_dataset,
                                     scalers = transform,
                                     splitter = dataset.get_splitter(**cfg.dataset.splitting),
-                                    mask_scaling = True,
+                                    mask_scaling = False,
                                     batch_size = cfg.batch_size,
                                     workers = cfg.workers )
     dm.setup()
