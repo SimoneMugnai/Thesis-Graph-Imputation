@@ -3,7 +3,7 @@ defaults:
   - logger: null
   - optimizer: adam
   - lr_scheduler: multistep
-  - dataset: la
+  - dataset: la_missing
   - model: grin
 
 #### Experiment params ########################################################
@@ -27,12 +27,6 @@ run_tags: []
 
 workers: 0
 num_threads: 1
-
-#### Windowing params #########################################################
-window: 12
-stride: 1
-
-
 
 #### Training params ##########################################################
 epochs: 200

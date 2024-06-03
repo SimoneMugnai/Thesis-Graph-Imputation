@@ -1,0 +1,10 @@
+# @package _global_
+defaults:
+  - la
+  - _self_
+
+#### Windowing params #########################################################
+window: 24
+horizon: 24
+delay: -24
+stride: 1
