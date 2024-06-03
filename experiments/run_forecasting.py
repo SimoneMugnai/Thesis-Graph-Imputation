@@ -266,6 +266,7 @@ def run(cfg: DictConfig):
                                    tags=cfg.tags,
                                    params=run_args,
                                    debug=cfg.logger.offline)
+        exp_logger.log_artifact(os.path.join(exp.run_dir, "config.yaml"))
     else:
         raise NotImplementedError("Logger backend not supported.")
     
