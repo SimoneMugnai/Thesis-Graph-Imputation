@@ -1,6 +1,5 @@
 # @package _global_
 
-
 model:
   name: birnni
   hparams:
@@ -12,8 +11,3 @@ model:
     n_layers: 1
     cat_states_layers: False
 
-dataset:
-  connectivity:
-    layout: csr
-
-mask_as_exog: True

@@ -149,10 +149,11 @@ def run(cfg: DictConfig):
         u.append(dataset.datetime_onehot('weekday').values)
     if cfg.dataset.covariates.mask:
         u.append(mask.astype(np.float32))
-    if cfg.dataset.covariates.std:
-        u.append(df_agg_std.values[...,None])
-    if cfg.dataset.covariates.residual:
-        u.append(residuals.values[...,None])
+    if  cfg.imputation_model.name != "none":
+        if cfg.dataset.covariates.std:
+            u.append(df_agg_std.values[...,None])
+        if cfg.dataset.covariates.residual:
+            u.append(residuals.values[...,None])
     
     # covariates union
     assert len(u)

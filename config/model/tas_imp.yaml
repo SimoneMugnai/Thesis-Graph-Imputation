@@ -2,12 +2,18 @@
 
 #### Model params #############################################################
 model:
-  name: tts_imp
+  name: tas_imp
   hparams:
     hidden_size: 16
     add_embedding_before: ['encoding', 'decoding']
     use_local_weights: null # ['encoder', 'decoder']
-    time_layers: 1
-    graph_layers: 2
+    root_weight: True
+    n_layers: 1
+    norm: 'asym'
+    cached: True
     activation: 'elu'
-                
+
+dataset:
+  connectivity:
+    layout: csr
+    

@@ -34,7 +34,7 @@ run_tags: []
 workers: 0
 num_threads: 1
 
-mask_as_exog: True
+
 
 #### Windowing params #########################################################
 window: 12

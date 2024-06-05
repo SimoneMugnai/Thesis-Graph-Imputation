@@ -16,4 +16,4 @@ model:
 # Imputation
 imputation_loss: True
 
-mask_as_exog: False
+

@@ -22,14 +22,13 @@ dataset:
     year: True
     day: True
     weekday: True
-    mask: ${mask_as_exog}
+    mask: True
     std: True
     residual: True 
 
 #### Windowing params #########################################################
-window: 24
-horizon: 24
-delay: -24
+window: 12
+horizon: 12
 stride: 1
 
 scaler:

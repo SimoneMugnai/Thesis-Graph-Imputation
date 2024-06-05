@@ -44,4 +44,3 @@ whiten_prob: 0.05
 imputation_warm_up: 0 
 
 prediction_loss_weight: null
-mask_as_exog: False
