@@ -5,7 +5,12 @@ defaults:
 
 #### Dataset params ###########################################################
 dataset:
-  name: LargeST
+  name: LargeST_${dataset.missing.name}
+  hparams:
+    subset: "SD"  # "CA", "GBA", "GLA", "SD"
+    year: [2017, 2018, 2019]
+    imputation_mode: "nearest"
+    freq: "15T"
   missing:
     seed: 231   # also number of nodes
     min_seq: 4  # 4 hours

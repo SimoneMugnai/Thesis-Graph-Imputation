@@ -34,9 +34,8 @@ def prediction_dataframe(y, index, columns=None, aggregate_by='mean'):
     return df_agg
 
 
-def prediction_dataframe_v2(y, index, columns=None, aggregate_by='mean'):
+def prediction_dataframe_v2(df, aggregate_by='mean'):
     """Aggregate batched predictions in a single DataFrame."""
-    df = pd.DataFrame(data=y, index=index, columns=columns)
     preds_by_step = df.groupby(df.index)
     
     aggregation_methods = {
