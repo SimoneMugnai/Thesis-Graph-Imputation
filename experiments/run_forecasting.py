@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import pandas as pd
 import torch
@@ -13,11 +15,13 @@ from tsl.engines import Predictor
 from tsl.experiment import Experiment, NeptuneLogger
 from tsl.metrics import torch as torch_metrics
 from tsl.nn import models as tsl_models
-import os
 
 from lib.nn import baselines
-from lib.utils import find_devices, add_missing_values, suppress_known_warnings, \
-    prediction_dataframe_v2, calculate_residuals
+from lib.utils import (find_devices,
+                       add_missing_values,
+                       suppress_known_warnings,
+                       prediction_dataframe_v2,
+                       calculate_residuals)
 
 
 def get_model_class(model_str):
@@ -79,19 +83,16 @@ def get_dataset(dataset_cfg):
     elif name.startswith('air'):
         dataset = tsl_datasets.AirQuality(small=name[:5] == 'air36',
                                           impute_nans=False)
-    elif name.startswith('Large'):
-        years = [2017, 2018, 2019]
-        dataset = tsl_datasets.LargeST(year = years,
-                                       subset = next((s for s in ["GLA", "GBA", "SD"] if s in name), "SD"),  
-                                       imputation_mode = "nearest")
+    elif name.startswith('LargeST'):
+        dataset = tsl_datasets.LargeST(**dataset_cfg.hparams)
     else:
         raise ValueError(f"Dataset {name} not present.")
-    
-    #adjacency matrix 
+
+    # adjacency matrix
     adj = dataset.get_connectivity(**dataset_cfg.connectivity)
-    #original mask
+    # original mask
     mask = dataset.get_mask().copy()  # [time, node, feature]
-    #new mask missing values:
+    # new mask missing values:
     if dataset_cfg.missing.name != 'normal':
         add_missing_values(
             dataset,
@@ -104,7 +105,8 @@ def get_dataset(dataset_cfg):
             propagation_hops=dataset_cfg.missing.get('propagation_hops', 0),
             seed=dataset_cfg.missing.seed)
         dataset.set_mask(dataset.training_mask)
-    return dataset, adj,mask
+    return dataset, adj, mask
+
 
 def run(cfg: DictConfig):
     dataset, adj, original_mask = get_dataset(cfg.dataset)
@@ -112,12 +114,11 @@ def run(cfg: DictConfig):
     data = dataset.dataframe()
     masked_data = data.where(mask.reshape(mask.shape[0], -1), np.nan)
 
-
-    if cfg.imputation_model.name != "none":  
+    if cfg.imputation_model.name != "none":
         hdf5_files = os.listdir(cfg.dir_imputation)
         # Initialize an empty list to store dataframes
         dataframes = []
-    
+
         # Loop through each HDF5 file and load the dataset
         for hdf5_file in hdf5_files:
             file_path = os.path.join(cfg.dir_imputation, hdf5_file)
@@ -126,21 +127,17 @@ def run(cfg: DictConfig):
 
         # Concatenate all dataframes into a single dataframe
         combined_df = pd.concat(dataframes)
-        #Perform aggregation
+        # Perform aggregation
         aggr_by = ['mean', 'sd']
-        results = prediction_dataframe_v2(combined_df.values, combined_df.index, combined_df.columns, aggregate_by=aggr_by)
+        results = prediction_dataframe_v2(combined_df, aggregate_by=aggr_by)
         df_agg_mean = results['mean']
         df_agg_std = results['sd']
         df_agg_std = df_agg_std.fillna(0)
         residuals = calculate_residuals(masked_data, df_agg_mean)
-        #set to 0 the std when I have missing values in the original dataset
-        df_agg_std = df_agg_std.where(residuals != 0, 0)
+        # set to 0 the std when I have missing values in the original dataset
+        # df_agg_std = df_agg_std.where(residuals != 0, 0)
 
-
-
-
-
-    #covariates
+    # covariates
     u = []
     if cfg.dataset.covariates.year:
         u.append(dataset.datetime_encoded('year').values)
@@ -150,16 +147,16 @@ def run(cfg: DictConfig):
         u.append(dataset.datetime_onehot('weekday').values)
     if cfg.dataset.covariates.mask:
         u.append(mask.astype(np.float32))
-    if  cfg.imputation_model.name != "none":
+    if cfg.imputation_model.name != "none":
         if cfg.dataset.covariates.std:
-            u.append(df_agg_std.values[...,None])
+            u.append(df_agg_std.values[..., None])
         if cfg.dataset.covariates.residual:
-            u.append(residuals.values[...,None])
-    
+            u.append(residuals.values[..., None])
+
     # covariates union
     assert len(u)
-    #ensure that all covariates have the same dimensionalities
-    #by expanding the one with lower dimension
+    # ensure that all covariates have the same dimensionality
+    # by expanding the one with lower dimension
     ndim = max(u_.ndim for u_ in u)
     u = np.concatenate([
         np.repeat(u_[:, None], dataset.n_nodes, 1)
@@ -168,14 +165,12 @@ def run(cfg: DictConfig):
         axis=-1
     )
 
-    
     if cfg.imputation_model.name != "none":
-        #from the experiment filling the missing values using directly the imputed values
+        # from the experiment filling the missing values using directly the imputed values
         data = masked_data.combine_first(df_agg_mean)
     else:
         # Fill nan with Last Observation Carried Forward
         data = masked_data.ffill().bfill()
-
 
     torch_dataset = SpatioTemporalDataset(
         target=data,
@@ -184,7 +179,7 @@ def run(cfg: DictConfig):
         covariates=dict(u=u),
         horizon=cfg.horizon,
         window=cfg.window,
-        delay= 0,
+        delay=0,
         stride=cfg.stride,
     )
 
@@ -196,19 +191,19 @@ def run(cfg: DictConfig):
     else:
         transform = None
 
-    dm = SpatioTemporalDataModule(dataset = torch_dataset,
-                                    scalers = transform,
-                                    splitter = dataset.get_splitter(**cfg.dataset.splitting),
-                                    mask_scaling = False,
-                                    batch_size = cfg.batch_size,
-                                    workers = cfg.workers )
+    dm = SpatioTemporalDataModule(
+        dataset=torch_dataset,
+        scalers=transform,
+        splitter=dataset.get_splitter(**cfg.dataset.splitting),
+        mask_scaling=cfg.imputation_model.name == "none",
+        batch_size=cfg.batch_size,
+        workers=cfg.workers,
+    )
     dm.setup()
 
-    
+    # predictors
 
-    #predictors
-
-    #get the model
+    # get the model
     model_cls = get_model_class(cfg.model.name)
     d_exog = torch_dataset.input_map.u.shape[-1] if 'u' in torch_dataset else 0
 
@@ -236,7 +231,6 @@ def run(cfg: DictConfig):
     else:
         scheduler_class = scheduler_kwargs = None
 
-    
     predictor = Predictor(
         model_class=model_cls,
         model_kwargs=model_kwargs,
@@ -249,7 +243,7 @@ def run(cfg: DictConfig):
         scale_target=False if scaler_cfg is None else scaler_cfg.scale_target,
     )
 
-     #logger
+    # logger
 
     run_args = exp.get_config_dict()
     run_args['model']['trainable_parameters'] = predictor.trainable_parameters
@@ -267,35 +261,32 @@ def run(cfg: DictConfig):
         exp_logger.log_artifact(os.path.join(exp.run_dir, "config.yaml"))
     else:
         raise NotImplementedError("Logger backend not supported.")
-    
+
     ##Training
 
-    early_stop_callback = EarlyStopping(monitor = 'val_mae',
-                                        patience = cfg.patience,
-                                        mode = 'min'
-                                        )
-    
+    early_stop_callback = EarlyStopping(monitor='val_mae',
+                                        patience=cfg.patience,
+                                        mode='min')
 
-    checkpoint_callback = ModelCheckpoint(dirpath = cfg.run.dir,
+    checkpoint_callback = ModelCheckpoint(dirpath=cfg.run.dir,
                                           save_top_k=1,
-                                          monitor = "val_mae",
-                                          mode = 'min'
-                                          )
-    
-    trainer = Trainer(max_epochs = cfg.epochs,
-                      limit_train_batches = cfg.train_batches,
-                      default_root_dir = cfg.run.dir,
-                      logger = exp_logger,
+                                          monitor="val_mae",
+                                          mode='min')
+
+    trainer = Trainer(max_epochs=cfg.epochs,
+                      limit_train_batches=cfg.train_batches,
+                      default_root_dir=cfg.run.dir,
+                      logger=exp_logger,
                       accelerator='gpu' if torch.cuda.is_available() else 'cpu',
                       devices=find_devices(1),
-                      gradient_clip_val = cfg.grad_clip_val,
+                      gradient_clip_val=cfg.grad_clip_val,
                       callbacks=[early_stop_callback, checkpoint_callback])
-    
-    trainer.fit(predictor, train_dataloaders = dm.train_dataloader(),
-                    val_dataloaders= dm.val_dataloader())
-    
 
-    #testing
+    trainer.fit(predictor,
+                train_dataloaders=dm.train_dataloader(),
+                val_dataloaders=dm.val_dataloader())
+
+    # testing
 
     predictor.load_model(checkpoint_callback.best_model_path)
 
@@ -327,12 +318,14 @@ def run(cfg: DictConfig):
                                 add_to_input_map=True)
 
     from torchmetrics import MetricCollection
-    predictor.test_metrics = MetricCollection(metrics={
-        k: predictor._check_metric(m)
-        for k, m in log_metrics.items()
-    },
-                                              prefix='test_',
-                                              postfix='_unmasked')
+    predictor.test_metrics = MetricCollection(
+        metrics={
+            k: predictor._check_metric(m)
+            for k, m in log_metrics.items()
+        },
+        prefix='test_',
+        postfix='_unmasked',
+    )
     trainer.test(predictor, dataloaders=dm.test_dataloader())
 
     if exp_logger is not None:
@@ -344,7 +337,7 @@ def run(cfg: DictConfig):
 if __name__ == '__main__':
     suppress_known_warnings()
     exp = Experiment(run_fn=run,
-                    config_path='../config/',
-                    config_name='default_forecasting')
+                     config_path='../config/',
+                     config_name='default_forecasting')
     res = exp.run()
     logger.info(res)
