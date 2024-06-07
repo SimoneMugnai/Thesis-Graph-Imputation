@@ -24,7 +24,7 @@ dataset:
     weekday: True
     mask: True
     std: True
-    residual: True
+    mean: True
 
 #### Windowing params #########################################################
 window: 12

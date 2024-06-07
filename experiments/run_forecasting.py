@@ -127,14 +127,19 @@ def run(cfg: DictConfig):
         # Concatenate all dataframes into a single dataframe
         combined_df = pd.concat(dataframes)
         #Perform aggregation
-        aggr_by = ['mean', 'sd']
-        results = prediction_dataframe_v2(combined_df.values, combined_df.index, combined_df.columns, aggregate_by=aggr_by)
-        df_agg_mean = results['mean']
+        if cfg.imputation_model.name in ["rnni", "grin"]:
+            aggr_by = ['trimmed_mean','sd']
+            results = prediction_dataframe_v2(combined_df.values, combined_df.index, combined_df.columns, aggregate_by=aggr_by)
+            df_agg_mean = results['trimmed_mean']
+        else:
+            aggr_by = ['mean', 'sd']
+            results = prediction_dataframe_v2(combined_df.values, combined_df.index, combined_df.columns, aggregate_by=aggr_by)
+            df_agg_mean = results['mean']
+        
         df_agg_std = results['sd']
         df_agg_std = df_agg_std.fillna(0)
-        residuals = calculate_residuals(masked_data, df_agg_mean)
-        #set to 0 the std when I have missing values in the original dataset
-        df_agg_std = df_agg_std.where(residuals != 0, 0)
+       
+        
 
 
 
@@ -153,8 +158,8 @@ def run(cfg: DictConfig):
     if  cfg.imputation_model.name != "none":
         if cfg.dataset.covariates.std:
             u.append(df_agg_std.values[...,None])
-        if cfg.dataset.covariates.residual:
-            u.append(residuals.values[...,None])
+        if cfg.dataset.covariates.mean:
+            u.append(df_agg_mean.values[...,None])
     
     # covariates union
     assert len(u)

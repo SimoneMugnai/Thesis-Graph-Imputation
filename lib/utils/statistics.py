@@ -42,10 +42,12 @@ def prediction_dataframe_v2(y, index, columns=None, aggregate_by='mean'):
     aggregation_methods = {
         'mean': lambda x: x.mean(),
         'sd': lambda x: x.std(),
-        'central': lambda x: x.iloc[len(x) // 2],
-        'smooth_central': lambda x: np.average(x, weights=gaussian(len(x), 1)),
-        'last': lambda x: x.iloc[-1]
+        'central': lambda x: x.apply(lambda y: y.iloc[len(y) // 2] ),
+        'smooth_central': lambda x: x.apply(lambda y: np.average(y, weights=gaussian(len(y), 1)) ),
+        'last': lambda x: x.apply(lambda y: y.iloc[-1] if len(y) > 0 else np.nan),
+        'trimmed_mean': lambda x: x.apply(lambda y: y.iloc[1:-1].mean() if len(y) > 4 else y.mean())
     }
+
     
     aggregate_by = ensure_list(aggregate_by)  # Ensure aggregate_by is a list
     results = {}
