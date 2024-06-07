@@ -90,6 +90,7 @@ def get_dataset(dataset_cfg):
     #adjacency matrix 
     adj = dataset.get_connectivity(**dataset_cfg.connectivity)
     #original mask
+    mask = dataset.get_mask().copy()  # [time, node, feature]
     #new mask missing values:
     if dataset_cfg.missing.name != 'normal':
         add_missing_values(
@@ -103,10 +104,10 @@ def get_dataset(dataset_cfg):
             propagation_hops=dataset_cfg.missing.get('propagation_hops', 0),
             seed=dataset_cfg.missing.seed)
         dataset.set_mask(dataset.training_mask)
-    return dataset, adj
+    return dataset, adj,mask
 
 def run(cfg: DictConfig):
-    dataset,adj = get_dataset(cfg.dataset)
+    dataset, adj, original_mask = get_dataset(cfg.dataset)
     mask = dataset.mask
     data = dataset.dataframe()
     masked_data = data.where(mask.reshape(mask.shape[0], -1), np.nan)
@@ -248,8 +249,7 @@ def run(cfg: DictConfig):
         scale_target=False if scaler_cfg is None else scaler_cfg.scale_target,
     )
 
-
-    #logger
+     #logger
 
     run_args = exp.get_config_dict()
     run_args['model']['trainable_parameters'] = predictor.trainable_parameters
@@ -300,7 +300,46 @@ def run(cfg: DictConfig):
     predictor.load_model(checkpoint_callback.best_model_path)
 
     predictor.freeze()
+    result = checkpoint_callback.best_model_score.item()
+
     trainer.test(predictor, datamodule=dm)
+
+    ########################################
+    # Test on unmasked data                #
+    ########################################
+
+    # Restore original mask
+    torch_dataset.set_mask(original_mask)
+    # Restore target
+    torch_dataset.set_data(dataset.numpy())
+    # Add data with imputations as input
+    torch_dataset.add_covariate('x',
+                                data,
+                                't n f',
+                                add_to_input_map=True,
+                                preprocess=True)
+    # Add again scaler for input
+    torch_dataset.add_scaler('x', torch_dataset.scalers['target'])
+    # Add mask only to mask input
+    torch_dataset.add_covariate('input_mask',
+                                mask,
+                                't n f',
+                                add_to_input_map=True)
+
+    from torchmetrics import MetricCollection
+    predictor.test_metrics = MetricCollection(metrics={
+        k: predictor._check_metric(m)
+        for k, m in log_metrics.items()
+    },
+                                              prefix='test_',
+                                              postfix='_unmasked')
+    trainer.test(predictor, dataloaders=dm.test_dataloader())
+
+    if exp_logger is not None:
+        exp_logger.finalize('success')
+
+    return result
+
 
 if __name__ == '__main__':
     suppress_known_warnings()
