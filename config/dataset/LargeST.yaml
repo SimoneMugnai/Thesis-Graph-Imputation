@@ -27,7 +27,7 @@ dataset:
     year: True
     day: True
     weekday: True
-    mask: ${mask_as_exog}
+    mask: True
 
 #### Windowing params #########################################################
 window: 24

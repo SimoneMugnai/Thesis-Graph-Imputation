@@ -16,6 +16,7 @@ from tsl.experiment import Experiment, NeptuneLogger
 from tsl.metrics import torch as torch_metrics
 from tsl.nn import models as tsl_models
 
+
 from lib.nn import baselines
 from lib.utils import (find_devices,
                        add_missing_values,
@@ -128,13 +129,13 @@ def run(cfg: DictConfig):
         # Concatenate all dataframes into a single dataframe
         combined_df = pd.concat(dataframes)
         #Perform aggregation
-        if cfg.imputation_model.name in ["rnni", "grin"]:
+        if cfg.imputation_model.name in ["birnni", "grin"]:
             aggr_by = ['trimmed_mean','sd']
-            results = prediction_dataframe_v2(combined_df.values, combined_df.index, combined_df.columns, aggregate_by=aggr_by)
+            results = prediction_dataframe_v2(combined_df, aggregate_by=aggr_by)
             df_agg_mean = results['trimmed_mean']
         else:
             aggr_by = ['mean', 'sd']
-            results = prediction_dataframe_v2(combined_df.values, combined_df.index, combined_df.columns, aggregate_by=aggr_by)
+            results = prediction_dataframe_v2(combined_df, aggregate_by=aggr_by)
             df_agg_mean = results['mean']
         
         df_agg_std = results['sd']
@@ -308,19 +309,13 @@ def run(cfg: DictConfig):
     torch_dataset.set_mask(original_mask)
     # Restore target
     torch_dataset.set_data(dataset.numpy())
-    # Add data with imputations as input
+
+    #Restore the input
     torch_dataset.add_covariate('x',
                                 data,
                                 't n f',
                                 add_to_input_map=True,
                                 preprocess=True)
-    # Add again scaler for input
-    torch_dataset.add_scaler('x', torch_dataset.scalers['target'])
-    # Add mask only to mask input
-    torch_dataset.add_covariate('input_mask',
-                                mask,
-                                't n f',
-                                add_to_input_map=True)
 
     from torchmetrics import MetricCollection
     predictor.test_metrics = MetricCollection(
