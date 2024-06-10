@@ -84,6 +84,7 @@ def get_dataset(dataset_cfg):
     elif name.startswith('air'):
         dataset = tsl_datasets.AirQuality(small=name[:5] == 'air36',
                                           impute_nans=False)
+        dataset.target.fillna(0,inplace=True)
     elif name.startswith('LargeST'):
         dataset = tsl_datasets.LargeST(**dataset_cfg.hparams)
     else:
@@ -316,6 +317,8 @@ def run(cfg: DictConfig):
                                 't n f',
                                 add_to_input_map=True,
                                 preprocess=True)
+    #scale again the target
+    torch_dataset.add_scaler('x', torch_dataset.scalers['target'])
 
     from torchmetrics import MetricCollection
     predictor.test_metrics = MetricCollection(
