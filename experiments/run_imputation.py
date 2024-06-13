@@ -1,5 +1,7 @@
-import numpy as np
 import os
+from datetime import datetime
+
+import numpy as np
 import pandas as pd
 import torch
 import tsl.datasets as tsl_datasets
@@ -8,37 +10,34 @@ from omegaconf import DictConfig
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
 from tsl import logger
-from tsl.data import SpatioTemporalDataset, SpatioTemporalDataModule, ImputationDataset
+from tsl.data import SpatioTemporalDataModule, ImputationDataset
 from tsl.data.preprocessing import scalers
+from tsl.engines import Imputer
 from tsl.experiment import Experiment, NeptuneLogger
 from tsl.metrics import torch_metrics
 from tsl.nn import models as tsl_models
 from tsl.transforms import MaskInput
-from tsl.engines import Imputer
-from datetime import datetime
 
 from lib.nn import baselines
-from lib.nn.engines import MissingDataPredictor
-from lib.utils import find_devices, add_missing_values, suppress_known_warnings, ensure_list, prediction_dataframe
-
-
+from lib.utils import find_devices, add_missing_values, suppress_known_warnings
 
 
 def get_model_class(model_str):
-    #Baseline_imputation method:###
+    # Baseline_imputation method:###
     if model_str == 'rnni':
         model = tsl_models.RNNImputerModel
-    elif model_str == 'grin':
-        model =baselines.GRINModel
-    elif model_str == 'spin-h':
-        model = baselines.SPINHierarchicalModel
     elif model_str == 'birnni':
         model = tsl_models.BiRNNImputerModel
+    elif model_str == 'grin':
+        model = baselines.GRINModel  # override to handle 2dim covariates
+    elif model_str == 'spin':
+        model = tsl_models.SPINModel
+    elif model_str == 'spin-h':
+        model = tsl_models.SPINHierarchicalModel
     else:
         raise NotImplementedError(f'Model "{model_str}" not available.')
 
     return model
-
 
 
 def get_dataset(dataset_cfg):
@@ -53,13 +52,13 @@ def get_dataset(dataset_cfg):
                                           impute_nans=False)
     elif name.startswith('Large'):
         years = [2017, 2018, 2019]
-        dataset = tsl_datasets.LargeST(year = years,
-                                       subset = next((s for s in ["GLA", "GBA", "SD"] if s in name), "SD"),  
-                                       imputation_mode = "nearest")
+        dataset = tsl_datasets.LargeST(year=years,
+                                       subset=next((s for s in ["GLA", "GBA", "SD"] if s in name), "SD"),
+                                       imputation_mode="nearest")
     else:
         raise ValueError(f"Dataset {name} not present.")
-    
-    #adjacency matrix 
+
+    # adjacency matrix
     adj = dataset.get_connectivity(**dataset_cfg.connectivity)
 
     # Add missing values in 'eval_mask': now 'training_mask' becomes
@@ -78,12 +77,9 @@ def get_dataset(dataset_cfg):
     return dataset, adj
 
 
-# check valori eval mask 1 siano 0 in training
-
-
 def run(cfg: DictConfig):
-    dataset,adj = get_dataset(cfg.dataset)
-    #covariates
+    dataset, adj = get_dataset(cfg.dataset)
+    # covariates
     u = []
     if cfg.dataset.covariates.year:
         u.append(dataset.datetime_encoded('year').values)
@@ -94,8 +90,8 @@ def run(cfg: DictConfig):
 
     # covariates union
     assert len(u)
-    #ensure that all covariates have the same dimensionalities
-    #by expanding the one with lower dimension
+    # ensure that all covariates have the same dimensionalities
+    # by expanding the one with lower dimension
     ndim = max(u_.ndim for u_ in u)
     u = np.concatenate([
         np.repeat(u_[:, None], dataset.n_nodes, 1)
@@ -104,7 +100,7 @@ def run(cfg: DictConfig):
         axis=-1
     )
 
-    #dataset in torch
+    # dataset in torch
     torch_dataset = ImputationDataset(target=dataset.dataframe(),
                                       mask=dataset.training_mask,
                                       eval_mask=dataset.eval_mask,
@@ -113,46 +109,38 @@ def run(cfg: DictConfig):
                                       connectivity=adj,
                                       window=cfg.window,
                                       stride=cfg.stride)
-    
-    torch_dataset.update_input_map(input_mask=['mask'])
 
-    #scale input
+    # scale input
     scaler_cfg = cfg.get("scaler")
     if scaler_cfg is not None:
-        scale_axis = (0,) if scaler_cfg.axis == "node" else (0,1)
-        scaler_cls = getattr(scalers,f'{scaler_cfg.method}Scaler') 
+        scale_axis = (0,) if scaler_cfg.axis == "node" else (0, 1)
+        scaler_cls = getattr(scalers, f'{scaler_cfg.method}Scaler')
         transform = dict(target=scaler_cls(axis=scale_axis))
-    else: 
+    else:
         transform = None
 
-    dm = SpatioTemporalDataModule(dataset = torch_dataset,
-                                  scalers = transform,
-                                  splitter = dataset.get_splitter(**cfg.dataset.splitting),
-                                  mask_scaling = True,
-                                  batch_size = cfg.batch_size,
-                                  workers = cfg.workers )
+    dm = SpatioTemporalDataModule(dataset=torch_dataset,
+                                  scalers=transform,
+                                  splitter=dataset.get_splitter(
+                                      **cfg.dataset.splitting),
+                                  mask_scaling=True,
+                                  batch_size=cfg.batch_size,
+                                  workers=cfg.workers)
     dm.setup()
 
-    
-
-
-    #get the model
+    # get the model
     model_cls = get_model_class(cfg.model.name)
     d_exog = torch_dataset.input_map.u.shape[-1] if 'u' in torch_dataset else 0
 
     model_kwargs = dict(n_nodes=torch_dataset.n_nodes,
                         input_size=torch_dataset.n_channels,
                         exog_size=d_exog,
-                        output_size = torch_dataset.n_channels,
-                        )
-    
+                        output_size=torch_dataset.n_channels)
+
     model_cls.filter_model_args_(model_kwargs)
     model_kwargs.update(cfg.model.hparams)
 
-
-    #predictors
-
-    #imputation loss 
+    # imputation loss
     loss_fn = torch_metrics.MaskedMAE()
 
     log_metrics = {
@@ -168,8 +156,6 @@ def run(cfg: DictConfig):
     else:
         scheduler_class = scheduler_kwargs = None
 
-    
-    
     imputer = Imputer(model_class=model_cls,
                       model_kwargs=model_kwargs,
                       optim_class=getattr(torch.optim, cfg.optimizer.name),
@@ -182,9 +168,8 @@ def run(cfg: DictConfig):
                       scale_target=False if scaler_cfg is None else scaler_cfg.scale_target,
                       whiten_prob=cfg.whiten_prob,
                       warm_up_steps=cfg.imputation_warm_up)
-    
-    #logger
 
+    # logger
     run_args = exp.get_config_dict()
     run_args['model']['trainable_parameters'] = imputer.trainable_parameters
     run_args = stringify_unsupported(run_args)
@@ -200,45 +185,41 @@ def run(cfg: DictConfig):
                                    debug=cfg.logger.offline)
     else:
         raise NotImplementedError("Logger backend not supported.")
-    
-    ##Training
 
-    early_stop_callback = EarlyStopping(monitor = 'val_mae',
-                                        patience = cfg.patience,
-                                        mode = 'min'
-                                        )
-    
+    # Training
 
-    checkpoint_callback = ModelCheckpoint(dirpath = cfg.run.dir,
+    early_stop_callback = EarlyStopping(monitor='val_mae',
+                                        patience=cfg.patience,
+                                        mode='min')
+
+    checkpoint_callback = ModelCheckpoint(dirpath=cfg.run.dir,
                                           save_top_k=1,
-                                          monitor = "val_mae",
-                                          mode = 'min'
-                                          )
-    
-    trainer = Trainer(max_epochs = cfg.epochs,
-                      limit_train_batches = cfg.train_batches,
-                      default_root_dir = cfg.run.dir,
-                      logger = exp_logger,
+                                          monitor="val_mae",
+                                          mode='min')
+
+    trainer = Trainer(max_epochs=cfg.epochs,
+                      limit_train_batches=cfg.train_batches,
+                      default_root_dir=cfg.run.dir,
+                      logger=exp_logger,
                       accelerator='gpu' if torch.cuda.is_available() else 'cpu',
                       devices=find_devices(1),
-                      gradient_clip_val = cfg.grad_clip_val,
+                      gradient_clip_val=cfg.grad_clip_val,
                       callbacks=[early_stop_callback, checkpoint_callback])
-    
-    trainer.fit(imputer, train_dataloaders = dm.train_dataloader(),
-                    val_dataloaders= dm.val_dataloader())
 
-    #testing
+    trainer.fit(imputer,
+                train_dataloaders=dm.train_dataloader(),
+                val_dataloaders=dm.val_dataloader())
+
+    # testing
 
     imputer.load_model(checkpoint_callback.best_model_path)
 
     imputer.freeze()
     trainer.test(imputer, datamodule=dm)
 
+    # saving dataset predictions
 
-
-    #saving dataset predictions
-
-    #creating the dataloader that contain the whole dataset
+    # creating the dataloader that contain the whole dataset
     dm.testset = np.arange(0, len(dm.torch_dataset))
     dm.splitter = None
     imputer.eval()
@@ -255,19 +236,16 @@ def run(cfg: DictConfig):
     index = pd.DatetimeIndex(index.reshape(-1))
     combined_tensor = combined_tensor.reshape(-1, *combined_tensor.shape[2:])
     # df_hats = dict(zip(aggr_methods, df_hats))
-     
 
-    #create the directory to dinamically save the imputation
+    # create the directory to dinamically save the imputation
     directory_path = os.path.join('/home/smugnai/Thesis_Imputation', cfg.dir_imp)
     os.makedirs(directory_path, exist_ok=True)
     df = pd.DataFrame(data=combined_tensor, index=index,
                       columns=dataset._columns_multiindex())
-    
+
     time_set = datetime.now().strftime("%Y%m%d_%H%M%S")
     file_path = os.path.join(directory_path, f'imputed_dataset_with_timestamps_{time_set}.h5')
     df.to_hdf(file_path, key='imputed_dataset', mode='w', complevel=3)
-
-
 
 
 if __name__ == '__main__':
@@ -277,31 +255,3 @@ if __name__ == '__main__':
                      config_name='default_imputation')
     res = exp.run()
     logger.info(res)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    
-
-
-
-
-    
-
-
-
-
-
-
