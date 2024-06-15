@@ -23,6 +23,13 @@ from lib.utils import (find_devices,
                        suppress_known_warnings,
                        prediction_dataframe_v2,
                        calculate_residuals)
+from lib.utils.statistics import prediction_dataframe_v3
+
+def CombineImputations():
+    def __call__(data):
+        ## Combine the imputations
+        pass
+        return data
 
 
 def get_model_class(model_str):
@@ -129,20 +136,28 @@ def run(cfg: DictConfig):
 
         # Concatenate all dataframes into a single dataframe
         combined_df = pd.concat(dataframes)
+
+        results_lag = prediction_dataframe_v3(
+            combined_df, imputation_window=24,
+            lags=list(range(1, cfg.window + 1)) + [24],
+            aggregate_by=['mean', 'sd'])
+
         #Perform aggregation
         if cfg.imputation_model.name in ["birnni", "grin"]:
             aggr_by = ['trimmed_mean','sd']
             results = prediction_dataframe_v2(combined_df, aggregate_by=aggr_by)
             df_agg_mean = results['trimmed_mean']
         else:
-            aggr_by = ['mean', 'sd']
-            results = prediction_dataframe_v2(combined_df, aggregate_by=aggr_by)
-            df_agg_mean = results['mean']
+            # Ivan: Why do you need this part?
+            # aggr_by = ['mean', 'sd']
+            # results = prediction_dataframe_v2(combined_df, aggregate_by=aggr_by)
+            # df_agg_mean = results['mean']
+            df_agg_mean = dataframes[0]
+            results = dict(sd=pd.DataFrame(0, index=df_agg_mean.index,
+                                           columns=df_agg_mean.columns))
         
         df_agg_std = results['sd']
         df_agg_std = df_agg_std.fillna(0)
-       
-        
 
     # covariates
     u = []
@@ -179,11 +194,20 @@ def run(cfg: DictConfig):
         # Fill nan with Last Observation Carried Forward
         data = masked_data.ffill().bfill()
 
+    covariates = dict(u=u)
+    for method in ['mean', 'sd']:
+        for lag in results_lag[method].keys():
+            if lag != 24:
+                df_lag = results_lag[method][lag]
+                df_lag = df_lag.combine_first(results_lag[method][24])
+                covariates[f'{method}/lag_{lag}'] = df_lag
+
     torch_dataset = SpatioTemporalDataset(
         target=data,
         mask=dataset.mask,
         connectivity=adj,
-        covariates=dict(u=u),
+        covariates=dict(u=u),  # covariates,
+        transform=CombineImputations(),
         horizon=cfg.horizon,
         window=cfg.window,
         delay=0,
@@ -207,8 +231,6 @@ def run(cfg: DictConfig):
         workers=cfg.workers,
     )
     dm.setup()
-
-    # predictors
 
     # get the model
     model_cls = get_model_class(cfg.model.name)
