@@ -16,19 +16,46 @@ from tsl.experiment import Experiment, NeptuneLogger
 from tsl.metrics import torch as torch_metrics
 from tsl.nn import models as tsl_models
 
-
 from lib.nn import baselines
 from lib.utils import (find_devices,
                        add_missing_values,
-                       suppress_known_warnings,
-                       prediction_dataframe_v2,
-                       calculate_residuals)
+                       suppress_known_warnings)
 from lib.utils.statistics import prediction_dataframe_v3
 
-def CombineImputations():
-    def __call__(data):
+
+class CombineImputations:
+
+    def __init__(self, ordered_lags, mean_covariate, std_covariate):
+        self.ordered_lags = ordered_lags
+        self.mean_covariate = mean_covariate
+        self.std_covariate = std_covariate
+
+    def __call__(self, data):
         ## Combine the imputations
-        pass
+        scaler = data.transform['x']
+
+        mean = torch.cat(
+            [data.pop(f'mean/lag_{lag}')[..., i:i + 1, :, :]
+             for i, lag in enumerate(self.ordered_lags)],
+            dim=-3
+        )
+        sd = torch.cat(
+            [data.pop(f'sd/lag_{lag}')[..., i:i + 1, :, :]
+             for i, lag in enumerate(self.ordered_lags)],
+            dim=-3
+        )
+        mean = scaler.transform(mean)
+
+        # replace covariates with correct imputation mean and sd
+        if self.mean_covariate and self.std_covariate:
+            data.u[..., -2:] = torch.cat([sd, mean], dim=-1)
+        elif self.mean_covariate:
+            data.u[..., -1:] = mean
+        elif self.std_covariate:
+            data.u[..., -1:] = sd
+
+        # impute missing values in x with the correct mean
+        data.x = torch.where(data.mask, data.x, mean)
         return data
 
 
@@ -91,7 +118,7 @@ def get_dataset(dataset_cfg):
     elif name.startswith('air'):
         dataset = tsl_datasets.AirQuality(small=name[:5] == 'air36',
                                           impute_nans=False)
-        dataset.target.fillna(0,inplace=True)
+        dataset.target.fillna(0, inplace=True)
     elif name.startswith('LargeST'):
         dataset = tsl_datasets.LargeST(**dataset_cfg.hparams)
     else:
@@ -123,6 +150,10 @@ def run(cfg: DictConfig):
     data = dataset.dataframe()
     masked_data = data.where(mask.reshape(mask.shape[0], -1), np.nan)
 
+    imputation_window = cfg.get('imputation_window', 24)
+
+    custom_transform = None
+
     if cfg.imputation_model.name != "none":
         hdf5_files = os.listdir(cfg.dir_imputation)
         # Initialize an empty list to store dataframes
@@ -137,27 +168,38 @@ def run(cfg: DictConfig):
         # Concatenate all dataframes into a single dataframe
         combined_df = pd.concat(dataframes)
 
-        results_lag = prediction_dataframe_v3(
-            combined_df, imputation_window=24,
-            lags=list(range(1, cfg.window + 1)) + [24],
-            aggregate_by=['mean', 'sd'])
-
-        #Perform aggregation
+        # Perform aggregation
         if cfg.imputation_model.name in ["birnni", "grin"]:
-            aggr_by = ['trimmed_mean','sd']
-            results = prediction_dataframe_v2(combined_df, aggregate_by=aggr_by)
-            df_agg_mean = results['trimmed_mean']
+            # Old code
+            # aggr_by = ['trimmed_mean','sd']
+            # results = prediction_dataframe_v2(combined_df, aggregate_by=aggr_by)
+            # df_agg_mean = results['trimmed_mean']
+
+            # New code
+            lags = list(range(cfg.window, 0, -1))
+            results_lag = prediction_dataframe_v3(
+                combined_df,
+                imputation_window=imputation_window,
+                lags=lags + [imputation_window],
+                aggregate_by=['mean', 'sd']
+            )
+            df_agg_mean = results_lag['mean'][imputation_window]
+            df_agg_std = results_lag['sd'][imputation_window]
+            df_agg_std = df_agg_std.fillna(0)
+
+            custom_transform = CombineImputations(
+                ordered_lags=lags,
+                mean_covariate=cfg.dataset.covariates.mean,
+                std_covariate=cfg.dataset.covariates.std
+            )
         else:
             # Ivan: Why do you need this part?
             # aggr_by = ['mean', 'sd']
             # results = prediction_dataframe_v2(combined_df, aggregate_by=aggr_by)
             # df_agg_mean = results['mean']
             df_agg_mean = dataframes[0]
-            results = dict(sd=pd.DataFrame(0, index=df_agg_mean.index,
-                                           columns=df_agg_mean.columns))
-        
-        df_agg_std = results['sd']
-        df_agg_std = df_agg_std.fillna(0)
+            df_agg_std = pd.DataFrame(0, index=df_agg_mean.index,
+                                      columns=df_agg_mean.columns)
 
     # covariates
     u = []
@@ -171,10 +213,10 @@ def run(cfg: DictConfig):
         u.append(mask.astype(np.float32))
     if cfg.imputation_model.name != "none":
         if cfg.dataset.covariates.std:
-            u.append(df_agg_std.values[...,None])
+            u.append(df_agg_std.values[..., None])
         if cfg.dataset.covariates.mean:
-            u.append(df_agg_mean.values[...,None])
-    
+            u.append(df_agg_mean.values[..., None])
+
     # covariates union
     assert len(u)
     # ensure that all covariates have the same dimensionality
@@ -195,19 +237,27 @@ def run(cfg: DictConfig):
         data = masked_data.ffill().bfill()
 
     covariates = dict(u=u)
-    for method in ['mean', 'sd']:
-        for lag in results_lag[method].keys():
-            if lag != 24:
-                df_lag = results_lag[method][lag]
-                df_lag = df_lag.combine_first(results_lag[method][24])
-                covariates[f'{method}/lag_{lag}'] = df_lag
+    # Add mean and std as covariates for every lag, i.e., distance from
+    # the prediction horizon
+    if cfg.imputation_model.name in ["birnni", "grin"]:
+        for method in ['mean', 'sd']:
+            for lag in results_lag[method].keys():
+                if lag != imputation_window:
+                    df_lag = results_lag[method][lag]
+                    df_lag = df_lag.combine_first(
+                        results_lag[method][imputation_window])
+                    covariates[f'{method}/lag_{lag}'] = df_lag
 
+    # TODO: Al momento sto aggiungengo le imputation calcolate come la media su
+    #  tutto per calcolare gli scalers. Non è troppo corretto perchè ci sono
+    #  pochi dati (gli ultimi di training) che hanno visto qualche valore in più
+    #  sul futuro. Essendo pochi, si può trascurare al momento.
     torch_dataset = SpatioTemporalDataset(
         target=data,
         mask=dataset.mask,
         connectivity=adj,
-        covariates=dict(u=u),  # covariates,
-        transform=CombineImputations(),
+        covariates=covariates,  # dict(u=u),
+        transform=custom_transform,
         horizon=cfg.horizon,
         window=cfg.window,
         delay=0,
@@ -333,13 +383,13 @@ def run(cfg: DictConfig):
     # Restore target
     torch_dataset.set_data(dataset.numpy())
 
-    #Restore the input
+    # Restore the input
     torch_dataset.add_covariate('x',
                                 data,
                                 't n f',
                                 add_to_input_map=True,
                                 preprocess=True)
-    #scale again the target
+    # scale again the target
     torch_dataset.add_scaler('x', torch_dataset.scalers['target'])
 
     from torchmetrics import MetricCollection
