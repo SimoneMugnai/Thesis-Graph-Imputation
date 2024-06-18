@@ -24,11 +24,11 @@ from lib.utils.statistics import prediction_dataframe_v3
 
 
 class CombineImputations:
-
     def __init__(self, ordered_lags, mean_covariate, std_covariate):
         self.ordered_lags = ordered_lags
         self.mean_covariate = mean_covariate
         self.std_covariate = std_covariate
+
 
     def __call__(self, data):
         ## Combine the imputations
@@ -53,10 +53,13 @@ class CombineImputations:
             data.u[..., -1:] = mean
         elif self.std_covariate:
             data.u[..., -1:] = sd
-
+    
         # impute missing values in x with the correct mean
-        data.x = torch.where(data.mask, data.x, mean)
+        mask_to_use = data.unmasked if hasattr(data, 'unmasked') and data.unmasked is not None else data.mask
+        data.x = torch.where(mask_to_use, data.x, mean)
         return data
+    
+
 
 
 def get_model_class(model_str):
@@ -169,12 +172,7 @@ def run(cfg: DictConfig):
         combined_df = pd.concat(dataframes)
 
         # Perform aggregation
-        if cfg.imputation_model.name in ["birnni", "grin"]:
-            # Old code
-            # aggr_by = ['trimmed_mean','sd']
-            # results = prediction_dataframe_v2(combined_df, aggregate_by=aggr_by)
-            # df_agg_mean = results['trimmed_mean']
-
+        if cfg.imputation_model.name in ["birnni", "grin","rnni"]:
             # New code
             lags = list(range(cfg.window, 0, -1))
             results_lag = prediction_dataframe_v3(
@@ -190,13 +188,9 @@ def run(cfg: DictConfig):
             custom_transform = CombineImputations(
                 ordered_lags=lags,
                 mean_covariate=cfg.dataset.covariates.mean,
-                std_covariate=cfg.dataset.covariates.std
+                std_covariate=cfg.dataset.covariates.std,
             )
         else:
-            # Ivan: Why do you need this part?
-            # aggr_by = ['mean', 'sd']
-            # results = prediction_dataframe_v2(combined_df, aggregate_by=aggr_by)
-            # df_agg_mean = results['mean']
             df_agg_mean = dataframes[0]
             df_agg_std = pd.DataFrame(0, index=df_agg_mean.index,
                                       columns=df_agg_mean.columns)
@@ -239,7 +233,7 @@ def run(cfg: DictConfig):
     covariates = dict(u=u)
     # Add mean and std as covariates for every lag, i.e., distance from
     # the prediction horizon
-    if cfg.imputation_model.name in ["birnni", "grin"]:
+    if cfg.imputation_model.name in ["birnni", "grin","rnni"]:
         for method in ['mean', 'sd']:
             for lag in results_lag[method].keys():
                 if lag != imputation_window:
@@ -341,7 +335,7 @@ def run(cfg: DictConfig):
     else:
         raise NotImplementedError("Logger backend not supported.")
 
-    ##Training
+    # ##Training
 
     early_stop_callback = EarlyStopping(monitor='val_mae',
                                         patience=cfg.patience,
@@ -361,35 +355,45 @@ def run(cfg: DictConfig):
                       gradient_clip_val=cfg.grad_clip_val,
                       callbacks=[early_stop_callback, checkpoint_callback])
 
-    trainer.fit(predictor,
-                train_dataloaders=dm.train_dataloader(),
-                val_dataloaders=dm.val_dataloader())
+    # trainer.fit(predictor,
+    #             train_dataloaders=dm.train_dataloader(),
+    #             val_dataloaders=dm.val_dataloader())
 
     # testing
 
-    predictor.load_model(checkpoint_callback.best_model_path)
+    # predictor.load_model(checkpoint_callback.best_model_path)
 
-    predictor.freeze()
-    result = checkpoint_callback.best_model_score.item()
+    # predictor.freeze()
+    # result = checkpoint_callback.best_model_score.item()
 
-    trainer.test(predictor, datamodule=dm)
+    # trainer.test(predictor, datamodule=dm)
 
     ########################################
     # Test on unmasked data                #
     ########################################
 
+   
+    
     # Restore original mask
     torch_dataset.set_mask(original_mask)
     # Restore target
     torch_dataset.set_data(dataset.numpy())
 
-    # Restore the input
     torch_dataset.add_covariate('x',
                                 data,
                                 't n f',
                                 add_to_input_map=True,
-                                preprocess=True)
-    # scale again the target
+                                preprocess=True )
+    
+    torch_dataset.add_covariate('unmasked',
+                                mask,
+                                't n f',
+                                add_to_input_map= True )
+    
+    
+    
+      
+    # # # scale again the target
     torch_dataset.add_scaler('x', torch_dataset.scalers['target'])
 
     from torchmetrics import MetricCollection
@@ -416,3 +420,4 @@ if __name__ == '__main__':
                      config_name='default_forecasting')
     res = exp.run()
     logger.info(res)
+  
