@@ -29,7 +29,6 @@ class CombineImputations:
         self.mean_covariate = mean_covariate
         self.std_covariate = std_covariate
 
-
     def __call__(self, data):
         ## Combine the imputations
         scaler = data.transform['x']
@@ -53,13 +52,10 @@ class CombineImputations:
             data.u[..., -1:] = mean
         elif self.std_covariate:
             data.u[..., -1:] = sd
-    
-        # impute missing values in x with the correct mean
-        mask_to_use = data.unmasked if hasattr(data, 'unmasked') and data.unmasked is not None else data.mask
-        data.x = torch.where(mask_to_use, data.x, mean)
-        return data
-    
 
+        # impute missing values in x with the correct mean
+        data.x = torch.where(data.input_mask, data.x, mean)
+        return data
 
 
 def get_model_class(model_str):
@@ -172,7 +168,7 @@ def run(cfg: DictConfig):
         combined_df = pd.concat(dataframes)
 
         # Perform aggregation
-        if cfg.imputation_model.name in ["birnni", "grin","rnni"]:
+        if cfg.imputation_model.name in ["birnni", "grin", "rnni"]:
             # New code
             lags = list(range(cfg.window, 0, -1))
             results_lag = prediction_dataframe_v3(
@@ -233,7 +229,7 @@ def run(cfg: DictConfig):
     covariates = dict(u=u)
     # Add mean and std as covariates for every lag, i.e., distance from
     # the prediction horizon
-    if cfg.imputation_model.name in ["birnni", "grin","rnni"]:
+    if cfg.imputation_model.name in ["birnni", "grin", "rnni"]:
         for method in ['mean', 'sd']:
             for lag in results_lag[method].keys():
                 if lag != imputation_window:
@@ -257,6 +253,9 @@ def run(cfg: DictConfig):
         delay=0,
         stride=cfg.stride,
     )
+
+    # Add mask to model's inputs as 'input_mask'
+    torch_dataset.update_input_map(input_mask=['mask'])
 
     scaler_cfg = cfg.get('scaler')
     if scaler_cfg is not None:
@@ -355,45 +354,40 @@ def run(cfg: DictConfig):
                       gradient_clip_val=cfg.grad_clip_val,
                       callbacks=[early_stop_callback, checkpoint_callback])
 
-    # trainer.fit(predictor,
-    #             train_dataloaders=dm.train_dataloader(),
-    #             val_dataloaders=dm.val_dataloader())
+    trainer.fit(predictor,
+                train_dataloaders=dm.train_dataloader(),
+                val_dataloaders=dm.val_dataloader())
 
     # testing
 
-    # predictor.load_model(checkpoint_callback.best_model_path)
+    predictor.load_model(checkpoint_callback.best_model_path)
 
-    # predictor.freeze()
-    # result = checkpoint_callback.best_model_score.item()
+    predictor.freeze()
+    result = checkpoint_callback.best_model_score.item()
 
-    # trainer.test(predictor, datamodule=dm)
+    trainer.test(predictor, datamodule=dm)
 
     ########################################
     # Test on unmasked data                #
     ########################################
 
-   
-    
-    # Restore original mask
+    # Restore original mask with no missing values
     torch_dataset.set_mask(original_mask)
-    # Restore target
+    # Restore original target with no missing values
     torch_dataset.set_data(dataset.numpy())
 
+    # Restore x as input with injected missing values
     torch_dataset.add_covariate('x',
                                 data,
                                 't n f',
                                 add_to_input_map=True,
-                                preprocess=True )
-    
-    torch_dataset.add_covariate('unmasked',
+                                preprocess=True)
+    # Restore input_mask as mask with injected missing values
+    torch_dataset.add_covariate('input_mask',
                                 mask,
                                 't n f',
-                                add_to_input_map= True )
-    
-    
-    
-      
-    # # # scale again the target
+                                add_to_input_map=True)
+    # Scale again the target
     torch_dataset.add_scaler('x', torch_dataset.scalers['target'])
 
     from torchmetrics import MetricCollection
@@ -420,4 +414,3 @@ if __name__ == '__main__':
                      config_name='default_forecasting')
     res = exp.run()
     logger.info(res)
-  
