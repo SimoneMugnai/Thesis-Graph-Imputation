@@ -167,29 +167,24 @@ def run(cfg: DictConfig):
         # Concatenate all dataframes into a single dataframe
         combined_df = pd.concat(dataframes)
 
-        # Perform aggregation
-        if cfg.imputation_model.name in ["birnni", "grin", "rnni"]:
             # New code
-            lags = list(range(cfg.window, 0, -1))
-            results_lag = prediction_dataframe_v3(
-                combined_df,
-                imputation_window=imputation_window,
-                lags=lags + [imputation_window],
-                aggregate_by=['mean', 'sd']
-            )
-            df_agg_mean = results_lag['mean'][imputation_window]
-            df_agg_std = results_lag['sd'][imputation_window]
-            df_agg_std = df_agg_std.fillna(0)
+        lags = list(range(cfg.window, 0, -1))
+        results_lag = prediction_dataframe_v3(
+            combined_df,
+            imputation_window=imputation_window,
+            lags=lags + [imputation_window],
+            aggregate_by=['mean', 'sd']
+        )
+        df_agg_mean = results_lag['mean'][imputation_window]
+        df_agg_std = results_lag['sd'][imputation_window]
+        df_agg_std = df_agg_std.fillna(0)
 
-            custom_transform = CombineImputations(
-                ordered_lags=lags,
-                mean_covariate=cfg.dataset.covariates.mean,
-                std_covariate=cfg.dataset.covariates.std,
-            )
-        else:
-            df_agg_mean = dataframes[0]
-            df_agg_std = pd.DataFrame(0, index=df_agg_mean.index,
-                                      columns=df_agg_mean.columns)
+        custom_transform = CombineImputations(
+            ordered_lags=lags,
+            mean_covariate=cfg.dataset.covariates.mean,
+            std_covariate=cfg.dataset.covariates.std,
+        )
+        
 
     # covariates
     u = []
@@ -229,7 +224,7 @@ def run(cfg: DictConfig):
     covariates = dict(u=u)
     # Add mean and std as covariates for every lag, i.e., distance from
     # the prediction horizon
-    if cfg.imputation_model.name in ["birnni", "grin", "rnni"]:
+    if cfg.imputation_model.name != "none":
         for method in ['mean', 'sd']:
             for lag in results_lag[method].keys():
                 if lag != imputation_window:
