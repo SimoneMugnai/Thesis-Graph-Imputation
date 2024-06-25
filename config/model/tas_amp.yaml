@@ -2,10 +2,15 @@
 
 #### Model params #############################################################
 model:
-  name: tag_aniso
+  name: tas_amp
   hparams:
-    hidden_size: 16
-    add_embedding_before: ['encoding', 'decoding']
+    hidden_size: 64  # 64, 32
+    emb_size: 32  # 32, 16
+    add_embedding_before: [ 'encoding', 'decoding' ]
     use_local_weights: null # ['encoder', 'decoder']
     n_layers: 1
     activation: 'elu'
+
+dataset:
+  connectivity:
+    layout: edge_index

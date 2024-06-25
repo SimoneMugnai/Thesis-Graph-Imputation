@@ -4,7 +4,8 @@
 model:
   name: tas_imp
   hparams:
-    hidden_size: 16
+    hidden_size: 64  # 64, 32
+    emb_size: 32  # 32, 16
     add_embedding_before: ['encoding', 'decoding']
     use_local_weights: null # ['encoder', 'decoder']
     root_weight: True
@@ -16,4 +17,3 @@ model:
 dataset:
   connectivity:
     layout: csr
-    
