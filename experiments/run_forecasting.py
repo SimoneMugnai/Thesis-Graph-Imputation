@@ -234,9 +234,7 @@ def run(cfg: DictConfig):
                     covariates[f'{method}/lag_{lag}'] = df_lag
 
     # TODO: Al momento sto aggiungengo le imputation calcolate come la media su
-    #  tutto per calcolare gli scalers. Non è troppo corretto perchè ci sono
-    #  pochi dati (gli ultimi di training) che hanno visto qualche valore in più
-    #  sul futuro. Essendo pochi, si può trascurare al momento.
+    #  tutto per calcolare gli scalers. 
     torch_dataset = SpatioTemporalDataset(
         target=data,
         mask=dataset.mask,
