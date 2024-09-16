@@ -1,4 +1,4 @@
-name: smugnai
+name: name
 channels:
   - pytorch
   - pyg
@@ -32,14 +32,5 @@ dependencies:
 
 # To install the environment:
 # > conda env create -f conda_env.yml
-# > conda activate smugnai
+# > conda activate name
 
-# After env created:
-# > pip install git+https://github.com/TorchSpatiotemporal/tsl.git@dev
-#
-# Alternatively, for developer options,
-# > cd ..
-# > git clone https://github.com/TorchSpatiotemporal/tsl.git
-# > cd tsl
-# > git checkout dev
-# > pip install -e .
